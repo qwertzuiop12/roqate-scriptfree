@@ -184,7 +184,6 @@ local function showCommandsForRank(speaker)
 end
 
 local function checkCommandPermissions(speaker, cmd)
-	if cmd == ".pricing" or cmd == ".freetrial" then return true end
 	if isOwner(speaker) then return true end
 
 	if isHeadAdmin(speaker) then
@@ -855,27 +854,18 @@ local function eliminatePlayers()
 	makeStandSpeak("Elimination protocol complete!")
 end
 
-local function freezePlayer(player)
-	if not player or not player.Character then return end
-	local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.WalkSpeed = 0
-		humanoid.JumpPower = 0
-	end
-end
-
-local function unfreezePlayer(player)
-	if not player or not player.Character then return end
-	local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.WalkSpeed = 16
-		humanoid.JumpPower = 50
-	end
-end
-
 local function eliminateAllPlayers(speaker)
 	stopActiveCommand()
 	activeCommand = "eliminateall"
+
+	if not equipKnife() then
+		makeStandSpeak("No knife found!")
+		return
+	end
+
+	makeStandSpeak("Initiating mass elimination!")
+	local knife = localPlayer.Character:FindFirstChild("Knife")
+	if not knife then return end
 
 	if not speaker or not speaker.Character then return end
 	local speakerRoot = getRoot(speaker.Character)
@@ -884,7 +874,7 @@ local function eliminateAllPlayers(speaker)
 	local myRoot = getRoot(localPlayer.Character)
 	if not myRoot then return end
 
-	makeStandSpeak("Initiating mass elimination!")
+	myRoot.CFrame = speakerRoot.CFrame * CFrame.new(0, 0, -2)
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
@@ -893,21 +883,10 @@ local function eliminateAllPlayers(speaker)
 				local targetRoot = getRoot(player.Character)
 				if targetRoot then
 					targetRoot.CFrame = speakerRoot.CFrame * CFrame.new(math.random(-5,5), 0, math.random(-5,5))
-					freezePlayer(player)
 				end
 			end
 		end
 	end
-
-	if not equipKnife() then
-		makeStandSpeak("No knife found!")
-		return
-	end
-
-	local knife = localPlayer.Character:FindFirstChild("Knife")
-	if not knife then return end
-
-	myRoot.CFrame = speakerRoot.CFrame * CFrame.new(0, 0, -2)
 
 	for i = 1, 100 do
 		simulateClick()
@@ -915,13 +894,6 @@ local function eliminateAllPlayers(speaker)
 	end
 
 	if knife then knife.Parent = localPlayer.Backpack end
-
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player ~= localPlayer then
-			unfreezePlayer(player)
-		end
-	end
-
 	makeStandSpeak("GG, elimination complete!")
 end
 
@@ -1687,9 +1659,9 @@ local function processCommandOriginal(speaker, message)
 			makeStandSpeak(msg)
 			task.wait(1.5)
 		end
-	elseif cmd == ".pricing" then
+	elseif cmd == "!pricing" then
 		showPricing(speaker)
-	elseif cmd == ".freetrial" then
+	elseif cmd == "!freetrial" then
 		if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
 			makeStandSpeak("You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
 			return
@@ -1710,15 +1682,35 @@ local function processCommandOriginal(speaker, message)
 		end
 	end
 end
-
 local function processCommand(speaker, message)
 	if not message then return end
-	local commandPrefix = message:match("^%.")
+	local commandPrefix = message:match("^[.!]")
 	if not commandPrefix then return end
 
+	-- Handle pricing and freetrial commands first since they're available to everyone
+	local cmd = message:match("^([^%s]+)"):lower()
+	if cmd == "!pricing" then
+		showPricing(speaker)
+		return
+	elseif cmd == "!freetrial" then
+		if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
+			makeStandSpeak("You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
+			return
+		end
+		if not isFreeTrial(speaker) then
+			table.insert(getgenv().FreeTrial, speaker.Name)
+			makeStandSpeak("Thanks for redeeming free trial! You have 5 minutes to use commands. Type .commands to see available commands")
+			spawn(function() processFreeTrial(speaker) end)
+		else
+			makeStandSpeak("You already have an active free trial")
+		end
+		return
+	end
+
+	-- For all other commands, check permissions
 	if speaker ~= localPlayer then
-		if not hasAdminPermissions(speaker) and not (commandPrefix == ".pricing" or commandPrefix == ".freetrial") then
-			makeStandSpeak("Hey "..speaker.Name..", you can't use commands. Type .pricing to see pricing or .freetrial to try it out")
+		if not hasAdminPermissions(speaker) then
+			makeStandSpeak("Hey "..speaker.Name..", you can't use commands. Type !pricing to see pricing or !freetrial to try it out")
 			return
 		end
 
@@ -1739,11 +1731,12 @@ local function processCommand(speaker, message)
 		commandCooldowns[speaker.Name] = currentTime
 	end
 
+	-- Process admin commands
 	local args = {}
 	for word in message:gmatch("%S+") do
 		table.insert(args, word)
 	end
-	local cmd = args[1]:lower()
+	cmd = args[1]:lower()
 
 	if cmd == ".pricing" then
 		showPricing(speaker)
@@ -1780,6 +1773,7 @@ local function processCommand(speaker, message)
 end
 
 local function setupChatListeners()
+	-- Existing player connections
 	for _, player in ipairs(Players:GetPlayers()) do
 		player.Chatted:Connect(function(message)
 			respondToChat(player, message)
@@ -1787,6 +1781,7 @@ local function setupChatListeners()
 		end)
 	end
 
+	-- New player connection
 	Players.PlayerAdded:Connect(function(player)
 		player.Chatted:Connect(function(message)
 			respondToChat(player, message)
@@ -1794,6 +1789,7 @@ local function setupChatListeners()
 		end)
 	end)
 
+	-- Player removal connection - moved inside the function
 	Players.PlayerRemoving:Connect(function(player)
 		if hasAdminPermissions(player) then
 			checkAdminLeft()
@@ -1801,6 +1797,7 @@ local function setupChatListeners()
 	end)
 end
 
+-- Main initialization
 if localPlayer then
 	owners = findOwners()
 	if #owners > 0 then
@@ -1809,6 +1806,7 @@ if localPlayer then
 		makeStandSpeak(getgenv().Configuration.Msg)
 	end
 
+	-- Wait for all services to be ready
 	local success, err = pcall(function()
 		setupChatListeners()
 	end)
