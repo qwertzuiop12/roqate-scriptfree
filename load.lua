@@ -1659,9 +1659,9 @@ local function processCommandOriginal(speaker, message)
 			makeStandSpeak(msg)
 			task.wait(1.5)
 		end
-	elseif cmd == ".pricing" then
+	elseif cmd == "!pricing" then
 		showPricing(speaker)
-	elseif cmd == ".freetrial" then
+	elseif cmd == "!freetrial" then
 		if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
 			makeStandSpeak("You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
 			return
@@ -1690,11 +1690,11 @@ local function processCommand(speaker, message)
 
 	if speaker ~= localPlayer then
 		if not hasAdminPermissions(speaker) then
-			if commandPrefix == ".pricing" or commandPrefix == ".freetrial" then
+			if commandPrefix == "!pricing" or commandPrefix == "!freetrial" then
 				processCommandOriginal(speaker, message)
 				return
 			end
-			makeStandSpeak("Hey "..speaker.Name..", you can't use commands. Type .pricing to see pricing or .freetrial to try it out")
+			makeStandSpeak("Hey "..speaker.Name..", you can't use commands. Type !pricing to see pricing or !freetrial to try it out")
 			return
 		end
 
