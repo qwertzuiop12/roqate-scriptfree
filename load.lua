@@ -1,13 +1,3 @@
-getgenv()._="Add roqate to get latest update ok bai >.+ | If you pay for this script you get scammed, this script is completely free, if you remove this credit script wont work ok bai now"
-getgenv().Owners = {"Roqate"}
-getgenv().HeadAdmins = {"Cephaloure", "artwvrk", "DRILLY_KING","gravestune"}
-getgenv().Admins = {"restock12345", "Jschiling9", "rezngl", "benjo98946", "stup1dSarah", "andrewjordan145", "HesCareless"} 
-getgenv().FreeTrial = {}
-getgenv().Configuration = {
-	['Msg'] = 'Yare Yare Daze.',
-	['whitelist'] = {}
-}
-
 if not getgenv() then getgenv = function() return _G end end
 if not getgenv()._ or type(getgenv()._) ~= "string" or not getgenv()._:find("Add roqate to get latest update ok bai >.+ | If you pay for this script you get scammed, this script is completely free, if you remove this credit script wont work ok bai now") then
 	game:GetService("Players").LocalPlayer:Kick("\n⚠️ Script tampering detected!\nThis script is free, don't remove credits.")
