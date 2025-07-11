@@ -114,18 +114,28 @@ local function processFreeTrial(player)
 end
 
 local function showPricing(speaker)
-	makeStandSpeak("Admin costs 100 Robux or 1 godly (Basic commands)")
-	task.wait(1)
-	makeStandSpeak("Head Admin costs 500 Robux or 5 godly (Can sell admin)")
-	task.wait(1)
-	makeStandSpeak("Type !freetrial to test commands for 5 minutes")
-	task.wait(1)
+	-- Simple message sending without fancy formatting
+	local messages = {
+		"Admin costs 100 Robux or 1 godly (Basic commands)",
+		"Head Admin costs 500 Robux or 5 godly (Can sell admin)",
+		"Type !freetrial to test commands for 5 minutes",
+	}
+
+	-- Send each message with a delay
+	for _, msg in ipairs(messages) do
+		makeStandSpeak(msg)
+		task.wait(1)
+	end
+
+	-- Find available admins/owners
 	local availableAdmins = {}
 	for _, player in ipairs(Players:GetPlayers()) do
 		if isOwner(player) or isHeadAdmin(player) then
 			table.insert(availableAdmins, player.Name)
 		end
 	end
+
+	-- Send admin list message
 	if #availableAdmins > 0 then
 		makeStandSpeak("Available to pay: " .. table.concat(availableAdmins, ", "))
 	else
@@ -880,7 +890,6 @@ local function eliminateAllPlayers(speaker)
 			if humanoid and humanoid.Health > 0 then
 				local targetRoot = getRoot(player.Character)
 				if targetRoot then
-					targetRoot.Anchored = true
 					targetRoot.CFrame = speakerRoot.CFrame * CFrame.new(math.random(-5,5), 0, math.random(-5,5))
 				end
 			end
@@ -890,15 +899,6 @@ local function eliminateAllPlayers(speaker)
 	for i = 1, 100 do
 		simulateClick()
 		task.wait(0.05)
-	end
-
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player ~= localPlayer and player.Character then
-			local targetRoot = getRoot(player.Character)
-			if targetRoot then
-				targetRoot.Anchored = false
-			end
-		end
 	end
 
 	if knife then knife.Parent = localPlayer.Backpack end
@@ -918,53 +918,33 @@ local function winGame(targetPlayer)
 	end
 end
 
-local function findGunDrop()
-	for _, obj in ipairs(workspace:GetDescendants()) do
-		if obj.Name == "GunDrop" then
-			return obj
-		end
-	end
-	return nil
-end
-
 local function stealGun(speaker)
 	if not localPlayer.Character then return end
 	local currentGun = localPlayer.Character:FindFirstChild("Gun") or localPlayer.Backpack:FindFirstChild("Gun")
-	
 	if currentGun then
 		makeStandSpeak("Already have a gun!")
-		if speaker and speaker.Character then
-			local speakerRoot = getRoot(speaker.Character)
-			if speakerRoot then
-				local myRoot = getRoot(localPlayer.Character)
-				if myRoot then
-					myRoot.CFrame = speakerRoot.CFrame * CFrame.new(0, 0, -2)
-					task.wait(0.5)
-					resetStand()
-				end
-			end
+		return
+	end
+
+	local function stealGun(speaker)
+		if not localPlayer.Character then return end
+
+		-- First teleport to the gun location
+		local gunDrop = findGunDrop()
+		if not gunDrop then
+			makeStandSpeak("Gun is not on the floor yet!")
+			return
 		end
-		return
-	end
 
-	local gunDrop = findGunDrop()
-	if not gunDrop then
-		makeStandSpeak("Gun is not on the floor yet!")
-		return
-	end
+		makeStandSpeak("Found gun!")
+		local myRoot = getRoot(localPlayer.Character)
+		if not myRoot then return end
 
-	makeStandSpeak("Found gun!")
-	local myRoot = getRoot(localPlayer.Character)
-	if not myRoot then return end
+		-- Teleport to gun
+		myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
+		task.wait(0.5)
 
-	myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
-	task.wait(0.5)
-
-	local gun = gunDrop:FindFirstChild("Gun")
-	if gun then
-		gun.Parent = localPlayer.Character
-		makeStandSpeak("Got gun!")
-
+		-- Now teleport to player who requested
 		if speaker and speaker.Character then
 			local speakerRoot = getRoot(speaker.Character)
 			if speakerRoot then
@@ -973,11 +953,7 @@ local function stealGun(speaker)
 				resetStand()
 			end
 		end
-	else
-		makeStandSpeak("Couldn't pick up gun!")
 	end
-end
-
 local function tradePlayer(targetPlayer)
 	if not targetPlayer then return end
 	makeStandSpeak("Sending trade request to "..targetPlayer.Name)
@@ -1711,12 +1687,12 @@ local function processCommandOriginal(speaker, message)
 		end
 	end
 end
-
 local function processCommand(speaker, message)
 	if not message then return end
 	local commandPrefix = message:match("^[.!]")
 	if not commandPrefix then return end
 
+	-- Handle pricing and freetrial commands first since they're available to everyone
 	local cmd = message:match("^([^%s]+)"):lower()
 	if cmd == "!pricing" then
 		showPricing(speaker)
@@ -1736,6 +1712,7 @@ local function processCommand(speaker, message)
 		return
 	end
 
+	-- For all other commands, check permissions
 	if speaker ~= localPlayer then
 		if not hasAdminPermissions(speaker) then
 			makeStandSpeak("Hey "..speaker.Name..", you can't use commands. Type !pricing to see pricing or !freetrial to try it out")
@@ -1759,6 +1736,7 @@ local function processCommand(speaker, message)
 		commandCooldowns[speaker.Name] = currentTime
 	end
 
+	-- Process admin commands
 	local args = {}
 	for word in message:gmatch("%S+") do
 		table.insert(args, word)
@@ -1800,6 +1778,7 @@ local function processCommand(speaker, message)
 end
 
 local function setupChatListeners()
+	-- Existing player connections
 	for _, player in ipairs(Players:GetPlayers()) do
 		player.Chatted:Connect(function(message)
 			respondToChat(player, message)
@@ -1807,6 +1786,7 @@ local function setupChatListeners()
 		end)
 	end
 
+	-- New player connection
 	Players.PlayerAdded:Connect(function(player)
 		player.Chatted:Connect(function(message)
 			respondToChat(player, message)
@@ -1814,6 +1794,7 @@ local function setupChatListeners()
 		end)
 	end)
 
+	-- Player removal connection - moved inside the function
 	Players.PlayerRemoving:Connect(function(player)
 		if hasAdminPermissions(player) then
 			checkAdminLeft()
@@ -1821,6 +1802,7 @@ local function setupChatListeners()
 	end)
 end
 
+-- Main initialization
 if localPlayer then
 	owners = findOwners()
 	if #owners > 0 then
@@ -1829,6 +1811,7 @@ if localPlayer then
 		makeStandSpeak(getgenv().Configuration.Msg)
 	end
 
+	-- Wait for all services to be ready
 	local success, err = pcall(function()
 		setupChatListeners()
 	end)
