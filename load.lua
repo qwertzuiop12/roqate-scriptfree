@@ -117,6 +117,8 @@ local function showPricing(speaker)
     task.wait(1)
     makeStandSpeak("Head Admin is 500 Robux or 5 godly - Can sell admin to others")
     task.wait(1)
+    makeStandSpeak("Type .freetrial to try commands for 5 minutes")
+    task.wait(1)
     
     local ownersHeadAdmins = {}
     for _, player in ipairs(Players:GetPlayers()) do
@@ -143,6 +145,7 @@ local function showCommandsForRank(speaker)
     elseif isFreeTrial(speaker) then
         rank = "freetrial"
     else
+        makeStandSpeak("You don't have permission to use commands. Type .pricing or .freetrial")
         return
     end
 
@@ -151,22 +154,22 @@ local function showCommandsForRank(speaker)
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
             ".fling", ".stealgun", ".whitelist", ".addowner", ".addadmin", ".removeadmin", 
             ".sus", ".stopsus", ".eliminate", ".win", ".commands", ".disable", ".enable", 
-            ".stopcmds", ".rejoin", ".quit", ".describe"
+            ".stopcmds", ".rejoin", ".quit", ".describe", ".headadmin", ".pricing", ".freetrial"
         },
         headadmin = {
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
             ".fling", ".stealgun", ".whitelist", ".addadmin", ".sus", ".stopsus", 
-            ".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe"
+            ".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe", ".pricing", ".freetrial"
         },
         admin = {
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
             ".fling", ".stealgun", ".sus", ".stopsus", ".eliminate", ".win", 
-            ".commands", ".stopcmds", ".describe"
+            ".commands", ".stopcmds", ".describe", ".pricing", ".freetrial"
         },
         freetrial = {
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
             ".fling", ".stealgun", ".sus", ".stopsus", ".eliminate", ".win", 
-            ".commands", ".stopcmds", ".describe"
+            ".commands", ".stopcmds", ".describe", ".pricing"
         }
     }
 
@@ -191,7 +194,7 @@ local function checkCommandPermissions(speaker, cmd)
     
     if isAdmin(speaker) then
         if cmd == ".addowner" or cmd == ".addadmin" or cmd == ".removeadmin" or cmd == ".whitelist" or 
-           cmd == ".disable" or cmd == ".enable" or cmd == ".quit" then
+           cmd == ".disable" or cmd == ".enable" or cmd == ".quit" or cmd == ".headadmin" then
             return false
         end
         return true
@@ -199,7 +202,7 @@ local function checkCommandPermissions(speaker, cmd)
     
     if isFreeTrial(speaker) then
         if cmd == ".addowner" or cmd == ".addadmin" or cmd == ".removeadmin" or cmd == ".whitelist" or 
-           cmd == ".disable" or cmd == ".enable" or cmd == ".quit" then
+           cmd == ".disable" or cmd == ".enable" or cmd == ".quit" or cmd == ".headadmin" then
             return false
         end
         return true
@@ -907,6 +910,11 @@ local function addOwner(playerName)
     makeStandSpeak("Added "..playerName.." as owner!")
 end
 
+local function addHeadAdmin(playerName)
+    table.insert(getgenv().HeadAdmins, playerName)
+    makeStandSpeak("Added "..playerName.." as head admin!")
+end
+
 local function addAdmin(playerName)
     table.insert(getgenv().Admins, playerName)
     makeStandSpeak("Added "..playerName.." as admin!")
@@ -1128,7 +1136,7 @@ local function showCommands(speaker)
         ".dismiss, .summon, .fling (all/sheriff/murder/user/random), .stealgun, .whitelist (user)",
         ".addowner (user), .removeadmin (user), .sus (user/murder/sheriff/random) (speed), .stopsus",
         ".eliminate (random), .win (user), .commands, .disable (cmd), .enable (cmd), .stopcmds, .rejoin",
-        ".describe (user/murd/sheriff)"
+        ".describe (user/murd/sheriff), .headadmin (user), .pricing, .freetrial"
     }
 
     for _, group in ipairs(commandGroups) do
@@ -1462,6 +1470,19 @@ local function processCommandOriginal(speaker, message)
         else
             makeStandSpeak("Player not found")
         end
+    elseif cmd == ".headadmin" and args[2] then
+        if not isMainOwner(speaker) then
+            local mainOwner = getMainOwner()
+            local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
+            makeStandSpeak("Only "..ownerName.." can use this command!")
+            return
+        end
+        local target = findTarget(table.concat(args, " ", 2))
+        if target then
+            addHeadAdmin(target.Name)
+        else
+            makeStandSpeak("Player not found")
+        end
     elseif cmd == ".addadmin" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
@@ -1566,6 +1587,20 @@ local function processCommandOriginal(speaker, message)
             makeStandSpeak(msg)
             task.wait(1.5)
         end
+    elseif cmd == ".pricing" then
+        showPricing(speaker)
+    elseif cmd == ".freetrial" then
+        if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
+            makeStandSpeak("You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
+            return
+        end
+        if not isFreeTrial(speaker) then
+            table.insert(getgenv().FreeTrial, speaker.Name)
+            makeStandSpeak("Thanks for redeeming free trial! You have 5 minutes to use commands. Type .commands to see available commands")
+            spawn(function() processFreeTrial(speaker) end)
+        else
+            makeStandSpeak("You already have an active free trial")
+        end
     end
 end
 
@@ -1576,7 +1611,7 @@ local function processCommand(speaker, message)
     
     if speaker ~= localPlayer then
         if not hasAdminPermissions(speaker) then
-            makeStandSpeak("Hey "..speaker.Name..", you can't use commands. Type .pricing or .freetrial")
+            makeStandSpeak("Hey "..speaker.Name..", you can't use commands. Type .pricing to see pricing or .freetrial to try it out")
             return
         end
         
@@ -1650,7 +1685,7 @@ local function setupChatListeners()
             respondToChat(player, message)
             processCommand(player, message)
         end)
-    end)
+    end
     
     Players.PlayerRemoving:Connect(function(player)
         if hasAdminPermissions(player) then
