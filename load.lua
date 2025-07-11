@@ -115,8 +115,11 @@ end
 
 local function showPricing(speaker)
 	makeStandSpeak("Admin costs 100 Robux or 1 godly (Basic commands)")
+	task.wait(1)
 	makeStandSpeak("Head Admin costs 500 Robux or 5 godly (Can sell admin)")
+	task.wait(1)
 	makeStandSpeak("Type !freetrial to test commands for 5 minutes")
+	task.wait(1)
 	local availableAdmins = {}
 	for _, player in ipairs(Players:GetPlayers()) do
 		if isOwner(player) or isHeadAdmin(player) then
@@ -144,6 +147,7 @@ local function showCommandsForRank(speaker)
 		makeStandSpeak("You don't have permission to use commands. Type .pricing or .freetrial")
 		return
 	end
+
 	local commands = {
 		owner = {
 			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
@@ -167,6 +171,7 @@ local function showCommandsForRank(speaker)
 			".commands", ".stopcmds", ".describe", ".pricing"
 		}
 	}
+
 	makeStandSpeak("Commands for "..rank..":")
 	for i, cmd in ipairs(commands[rank]) do
 		if i % 5 == 0 then
@@ -178,12 +183,14 @@ end
 
 local function checkCommandPermissions(speaker, cmd)
 	if isOwner(speaker) then return true end
+
 	if isHeadAdmin(speaker) then
 		if cmd == ".addowner" or cmd == ".removeadmin" or cmd == ".disable" or cmd == ".enable" or cmd == ".quit" then
 			return false
 		end
 		return true
 	end
+
 	if isAdmin(speaker) then
 		if cmd == ".addowner" or cmd == ".addadmin" or cmd == ".removeadmin" or cmd == ".whitelist" or 
 			cmd == ".disable" or cmd == ".enable" or cmd == ".quit" or cmd == ".headadmin" then
@@ -191,6 +198,7 @@ local function checkCommandPermissions(speaker, cmd)
 		end
 		return true
 	end
+
 	if isFreeTrial(speaker) then
 		if cmd == ".addowner" or cmd == ".addadmin" or cmd == ".removeadmin" or cmd == ".whitelist" or 
 			cmd == ".disable" or cmd == ".enable" or cmd == ".quit" or cmd == ".headadmin" or cmd == ".trade" or cmd == ".eliminateall" then
@@ -198,12 +206,15 @@ local function checkCommandPermissions(speaker, cmd)
 		end
 		return true
 	end
+
 	return false
 end
 
 local function warnCommandAbuse(speaker)
 	if isOwner(speaker) then return end
+
 	commandAbuseWarnings[speaker.Name] = (commandAbuseWarnings[speaker.Name] or 0) + 1
+
 	if commandAbuseWarnings[speaker.Name] >= 3 then
 		suspendedPlayers[speaker.Name] = os.time() + 300
 		makeStandSpeak(speaker.Name.." has been suspended for 5 minutes due to command spam")
@@ -401,43 +412,54 @@ end
 local function flingPlayer(target)
 	stopActiveCommand()
 	activeCommand = "fling"
+
 	if not target or target == localPlayer then return end
 	if yeetForce then yeetForce:Destroy() end
+
 	local startTime = tick()
 	local flingDuration = 10
+
 	local function continuousFling()
 		while activeCommand == "fling" and target and target.Parent do
 			if not target.Character or not target.Character.Parent then
 				break
 			end
+
 			local targetRoot = getRoot(target.Character)
 			local myRoot = getRoot(localPlayer.Character)
 			if not targetRoot or not myRoot then
 				break
 			end
+
 			if not yeetForce then
 				yeetForce = Instance.new('BodyThrust', myRoot)
 				yeetForce.Force = Vector3.new(9999,9999,9999)
 				yeetForce.Name = "YeetForce"
 				flinging = true
 			end
+
 			local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
 			if not humanoid or humanoid.Health <= 0 then
 				break
 			end
+
 			myRoot.CFrame = targetRoot.CFrame
 			yeetForce.Location = targetRoot.Position
+
 			if tick() - startTime > flingDuration then
 				break
 			end
+
 			RunService.Heartbeat:Wait()
 		end
+
 		if yeetForce then
 			yeetForce:Destroy()
 			yeetForce = nil
 		end
 		flinging = false
 	end
+
 	spawn(continuousFling)
 end
 
@@ -570,6 +592,7 @@ local function summonStand(speaker)
 	if not localPlayer.Character then return end
 	local myHrp = getRoot(localPlayer.Character)
 	if not myHrp then return end
+
 	if speaker and speaker.Character then
 		local speakerHrp = getRoot(speaker.Character)
 		if speakerHrp then
@@ -580,6 +603,7 @@ local function summonStand(speaker)
 			return
 		end
 	end
+
 	if #owners > 0 then
 		for _, owner in ipairs(owners) do
 			if owner.Character then
@@ -693,51 +717,65 @@ end
 local function startSus(targetPlayer, speed)
 	stopActiveCommand()
 	activeCommand = "sus"
+
 	if susTarget == targetPlayer then
 		makeStandSpeak("Already sus-ing "..targetPlayer.Name.."!")
 		return
 	end
 	susTarget = targetPlayer
 	makeStandSpeak("ULTRA SPEED sus on "..targetPlayer.Name..(speed and " at speed "..speed or "").."!")
+
 	if not localPlayer.Character then return end
 	local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
+
 	for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
 		track:Stop()
 	end
+
 	local anim = Instance.new("Animation")
 	anim.AnimationId = "rbxassetid://"..(isR15(localPlayer) and SUS_ANIMATION_R15 or SUS_ANIMATION_R6)
 	standAnimTrack = humanoid:LoadAnimation(anim)
 	standAnimTrack.Priority = Enum.AnimationPriority.Action4
 	standAnimTrack.Looped = true
+
 	standAnimTrack:AdjustSpeed(speed or (isR15(localPlayer) and 0.7 or 0.65))
 	if standAnimTrack then
 		standAnimTrack:Play()
 	end
+
 	humanoid.AutoRotate = false
 	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+
 	local camera = workspace.CurrentCamera
 	if camera then
 		camera.CameraType = Enum.CameraType.Scriptable
 	end
+
 	createSusBlock()
+
 	susConnection = RunService.RenderStepped:Connect(function()
 		if activeCommand ~= "sus" or not susTarget or not susTarget.Character or not localPlayer.Character then
 			stopSus()
 			return
 		end
+
 		local targetRoot = getRoot(susTarget.Character)
 		local myRoot = getRoot(localPlayer.Character)
 		if not targetRoot or not myRoot then return end
+
 		local lookVector = targetRoot.CFrame.LookVector
 		local targetPos = targetRoot.Position - (lookVector * 2)
 		myRoot.CFrame = CFrame.new(targetPos, targetRoot.Position)
+
 		if susBlock then
 			susBlock.CFrame = CFrame.new(targetRoot.Position - Vector3.new(0, 3, 0))
 		end
+
 		if camera and camera.CameraType == Enum.CameraType.Scriptable then
 			camera.CFrame = CFrame.new(myRoot.Position + Vector3.new(0, 3, -5), myRoot.Position)
 		end
+
 		if standAnimTrack then
 			standAnimTrack.TimePosition = 0.6
 			task.wait(0.1)
@@ -750,6 +788,7 @@ local function startSus(targetPlayer, speed)
 			end
 		end
 	end)
+
 	localPlayer.CharacterRemoving:Connect(stopSus)
 end
 
@@ -776,15 +815,19 @@ end
 local function eliminatePlayers()
 	stopActiveCommand()
 	activeCommand = "eliminate"
+
 	if not equipKnife() then
 		makeStandSpeak("No knife found!")
 		return
 	end
+
 	makeStandSpeak("Initiating elimination protocol!")
 	local knife = localPlayer.Character:FindFirstChild("Knife")
 	if not knife then return end
+
 	local eliminated = {}
 	local startTime = tick()
+
 	while activeCommand == "eliminate" do
 		for _, player in ipairs(Players:GetPlayers()) do
 			if player ~= localPlayer and player.Character then
@@ -804,6 +847,7 @@ local function eliminatePlayers()
 		end
 		task.wait(0.1)
 	end
+
 	if knife then knife.Parent = localPlayer.Backpack end
 	makeStandSpeak("Elimination protocol complete!")
 end
@@ -811,19 +855,25 @@ end
 local function eliminateAllPlayers(speaker)
 	stopActiveCommand()
 	activeCommand = "eliminateall"
+
 	if not equipKnife() then
 		makeStandSpeak("No knife found!")
 		return
 	end
+
 	makeStandSpeak("Initiating mass elimination!")
 	local knife = localPlayer.Character:FindFirstChild("Knife")
 	if not knife then return end
+
 	if not speaker or not speaker.Character then return end
 	local speakerRoot = getRoot(speaker.Character)
 	if not speakerRoot then return end
+
 	local myRoot = getRoot(localPlayer.Character)
 	if not myRoot then return end
+
 	myRoot.CFrame = speakerRoot.CFrame * CFrame.new(0, 0, -2)
+
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
 			local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
@@ -836,10 +886,12 @@ local function eliminateAllPlayers(speaker)
 			end
 		end
 	end
+
 	for i = 1, 100 do
 		simulateClick()
 		task.wait(0.05)
 	end
+
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
 			local targetRoot = getRoot(player.Character)
@@ -848,14 +900,17 @@ local function eliminateAllPlayers(speaker)
 			end
 		end
 	end
+
 	if knife then knife.Parent = localPlayer.Backpack end
 	makeStandSpeak("GG, elimination complete!")
 end
 
 local function winGame(targetPlayer)
 	stopActiveCommand()
+
 	if not targetPlayer or targetPlayer == localPlayer then return end
 	makeStandSpeak("Making "..targetPlayer.Name.." the winner!")
+
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player ~= targetPlayer then
 			flingPlayer(player)
@@ -875,24 +930,41 @@ end
 local function stealGun(speaker)
 	if not localPlayer.Character then return end
 	local currentGun = localPlayer.Character:FindFirstChild("Gun") or localPlayer.Backpack:FindFirstChild("Gun")
+	
 	if currentGun then
 		makeStandSpeak("Already have a gun!")
+		if speaker and speaker.Character then
+			local speakerRoot = getRoot(speaker.Character)
+			if speakerRoot then
+				local myRoot = getRoot(localPlayer.Character)
+				if myRoot then
+					myRoot.CFrame = speakerRoot.CFrame * CFrame.new(0, 0, -2)
+					task.wait(0.5)
+					resetStand()
+				end
+			end
+		end
 		return
 	end
+
 	local gunDrop = findGunDrop()
 	if not gunDrop then
 		makeStandSpeak("Gun is not on the floor yet!")
 		return
 	end
+
 	makeStandSpeak("Found gun!")
 	local myRoot = getRoot(localPlayer.Character)
 	if not myRoot then return end
+
 	myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
 	task.wait(0.5)
+
 	local gun = gunDrop:FindFirstChild("Gun")
 	if gun then
 		gun.Parent = localPlayer.Character
 		makeStandSpeak("Got gun!")
+
 		if speaker and speaker.Character then
 			local speakerRoot = getRoot(speaker.Character)
 			if speakerRoot then
@@ -909,12 +981,15 @@ end
 local function tradePlayer(targetPlayer)
 	if not targetPlayer then return end
 	makeStandSpeak("Sending trade request to "..targetPlayer.Name)
+
 	local args = {
 		targetPlayer
 	}
+
 	local success, err = pcall(function()
 		ReplicatedStorage:WaitForChild("Trade"):WaitForChild("SendRequest"):InvokeServer(unpack(args))
 	end)
+
 	if not success then
 		makeStandSpeak("Failed to send trade request!")
 	end
@@ -1014,8 +1089,10 @@ local function getSkinTone(humanoid)
 	if not humanoid or not humanoid:FindFirstChild("BodyColors") then
 		return "Unknown"
 	end
+
 	local skinColor = humanoid.BodyColors.HeadColor3
 	local r, g, b = skinColor.r * 255, skinColor.g * 255, skinColor.b * 255
+
 	if r > 240 and g > 220 and b > 200 then return "Pale White"
 	elseif r > 220 and g > 190 and b > 160 then return "Fair"
 	elseif r > 200 and g > 170 and b > 140 then return "Light"
@@ -1041,40 +1118,50 @@ local function describePlayer(targetName)
 		target = findTarget(targetName)
 		if not target then return {"Player not found!"} end
 	end
+
 	local messages = {}
 	local skinTone = "Unknown"
 	local accessories = {}
+
 	if target.Character then
 		local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
 		if humanoid then
 			skinTone = getSkinTone(humanoid)
 		end
+
 		for _, item in ipairs(target.Character:GetChildren()) do
 			if item:IsA("Accessory") then
 				table.insert(accessories, item.Name)
 			end
 		end
 	end
+
 	table.insert(messages, target.Name.."'s skin tone: "..skinTone)
+
 	if #accessories > 0 then
 		local half = math.ceil(#accessories / 2)
 		local firstHalf = {}
 		local secondHalf = {}
+
 		for i = 1, half do
 			table.insert(firstHalf, accessories[i])
 		end
+
 		for i = half + 1, #accessories do
 			table.insert(secondHalf, accessories[i])
 		end
+
 		if #firstHalf > 0 then
 			table.insert(messages, "Accessories (1/"..(#accessories > 1 and "2" or "1").."): "..table.concat(firstHalf, ", "))
 		end
+
 		if #secondHalf > 0 then
 			table.insert(messages, "Accessories (2/2): "..table.concat(secondHalf, ", "))
 		end
 	else
 		table.insert(messages, "No accessories found")
 	end
+
 	return messages
 end
 
@@ -1082,14 +1169,17 @@ local function checkCommandAbuse(speaker)
 	if not isOwner(speaker) then return false end
 	local mainOwner = getMainOwner()
 	if mainOwner and speaker.Name == mainOwner.Name then return false end
+
 	if isPlayerSuspended(speaker.Name) then
 		local remaining = suspendedPlayers[speaker.Name] - os.time()
 		makeStandSpeak(speaker.Name.." is suspended for "..remaining.." more seconds!")
 		return true
 	end
+
 	local currentTime = os.time()
 	commandAbuseCount[speaker.Name] = commandAbuseCount[speaker.Name] or {count = 0, lastTime = 0, warnings = 0}
 	local abuseData = commandAbuseCount[speaker.Name]
+
 	if currentTime - abuseData.lastTime < 10 then
 		abuseData.count = abuseData.count + 1
 		if abuseData.count >= 2 then
@@ -1116,12 +1206,15 @@ local function getInnocentPlayers()
 	local sheriffs = findPlayersWithTool("Gun")
 	local murdererNames = {}
 	local sheriffNames = {}
+
 	for _, player in ipairs(murderers) do
 		table.insert(murdererNames, isWhitelisted(player) and player.Name:sub(1,1) or player.Name)
 	end
+
 	for _, player in ipairs(sheriffs) do
 		table.insert(sheriffNames, isWhitelisted(player) and player.Name:sub(1,1) or player.Name)
 	end
+
 	if #murdererNames > 0 or #sheriffNames > 0 then
 		return "ALL Players but "..(#murdererNames > 0 and ("(Murderer: "..table.concat(murdererNames, ", ")..") ") or "")..(#sheriffNames > 0 and ("(Sheriff: "..table.concat(sheriffNames, ", ")..")") or "")
 	else
@@ -1136,6 +1229,7 @@ local function showCommands(speaker)
 		return
 	end
 	lastCommandsTime = currentTime
+
 	local commandGroups = {
 		".follow (user/murder/sheriff/random), .protect (on/off), .say (message), .reset, .hide",
 		".dismiss, .summon, .fling (all/sheriff/murder/user/random), .stealgun, .whitelist (user)",
@@ -1143,6 +1237,7 @@ local function showCommands(speaker)
 		".eliminate (random), .win (user), .commands, .disable (cmd), .enable (cmd), .stopcmds, .rejoin",
 		".describe (user/murd/sheriff), .headadmin (user), .pricing, .freetrial, .trade (user), .eliminateall"
 	}
+
 	for _, group in ipairs(commandGroups) do
 		makeStandSpeak(group)
 		task.wait(1)
@@ -1183,9 +1278,12 @@ end
 local function respondToChat(speaker, message)
 	if speaker == localPlayer then return end
 	if tick() - lastResponseTime < 5 then return end
+
 	if checkRudeMessage(speaker, message) then return end
 	if checkApology(speaker, message) then return end
+
 	local msg = message:lower()
+
 	if msg:find("i am afk") or msg:find("im afk") or msg:find("i'm afk") or msg:find("afk") then
 		afkPlayers[speaker.Name] = true
 		makeStandSpeak(speaker.Name.." is now AFK")
@@ -1197,21 +1295,25 @@ local function respondToChat(speaker, message)
 		lastResponseTime = tick()
 		return
 	end
+
 	if msg:find("who is innocent") or msg:find("whos innocent") then
 		makeStandSpeak(getInnocentPlayers())
 		lastResponseTime = tick()
 		return
 	end
+
 	if msg:find("good boy") then
 		makeStandSpeak("Yes I'm a good boy!")
 		lastResponseTime = tick()
 		return
 	end
+
 	if msg:find("roqate") or msg:find("who made you") or msg:find("who created you") or msg:find("who owns you") then
 		makeStandSpeak("My king Roqate!")
 		lastResponseTime = tick()
 		return
 	end
+
 	local responsePatterns = {
 		{
 			patterns = {"whats that", "what is that", "what is this", "what are you"},
@@ -1304,6 +1406,7 @@ local function respondToChat(speaker, message)
 			end
 		}
 	}
+
 	for _, responseGroup in ipairs(responsePatterns) do
 		if stringContainsAny(msg, responseGroup.patterns) then
 			local response
@@ -1323,13 +1426,16 @@ local function processCommandOriginal(speaker, message)
 	if not message then return end
 	local commandPrefix = message:match("^%.")
 	if not commandPrefix then return end
+
 	if tick() - lastCommandTime < commandDelay then return end
 	lastCommandTime = tick()
+
 	local args = {}
 	for word in message:gmatch("%S+") do
 		table.insert(args, word)
 	end
 	local cmd = args[1]:lower()
+
 	if cmd == ".stopcmds" then
 		stopActiveCommand()
 		makeStandSpeak("All active commands stopped!")
@@ -1610,6 +1716,7 @@ local function processCommand(speaker, message)
 	if not message then return end
 	local commandPrefix = message:match("^[.!]")
 	if not commandPrefix then return end
+
 	local cmd = message:match("^([^%s]+)"):lower()
 	if cmd == "!pricing" then
 		showPricing(speaker)
@@ -1628,29 +1735,36 @@ local function processCommand(speaker, message)
 		end
 		return
 	end
+
 	if speaker ~= localPlayer then
 		if not hasAdminPermissions(speaker) then
 			makeStandSpeak("Hey "..speaker.Name..", you can't use commands. Type !pricing to see pricing or !freetrial to try it out")
 			return
 		end
+
 		if isPlayerSuspended(speaker.Name) then
 			local remaining = suspendedPlayers[speaker.Name] - os.time()
 			makeStandSpeak(speaker.Name.." is suspended for "..math.floor(remaining).." more seconds")
 			return
 		end
+
 		local currentTime = os.time()
 		commandCooldowns[speaker.Name] = commandCooldowns[speaker.Name] or 0
+
 		if currentTime - commandCooldowns[speaker.Name] < 1 then
 			warnCommandAbuse(speaker)
 			return
 		end
+
 		commandCooldowns[speaker.Name] = currentTime
 	end
+
 	local args = {}
 	for word in message:gmatch("%S+") do
 		table.insert(args, word)
 	end
 	cmd = args[1]:lower()
+
 	if cmd == ".pricing" then
 		showPricing(speaker)
 		return
@@ -1671,14 +1785,17 @@ local function processCommand(speaker, message)
 		showCommandsForRank(speaker)
 		return
 	end
+
 	if not checkCommandPermissions(speaker, cmd) then
 		makeStandSpeak(speaker.Name..", you don't have permission for this command")
 		return
 	end
+
 	if isCommandDisabled(cmd) then
 		makeStandSpeak("This command is currently disabled")
 		return
 	end
+
 	processCommandOriginal(speaker, message)
 end
 
@@ -1689,12 +1806,14 @@ local function setupChatListeners()
 			processCommand(player, message)
 		end)
 	end
+
 	Players.PlayerAdded:Connect(function(player)
 		player.Chatted:Connect(function(message)
 			respondToChat(player, message)
 			processCommand(player, message)
 		end)
 	end)
+
 	Players.PlayerRemoving:Connect(function(player)
 		if hasAdminPermissions(player) then
 			checkAdminLeft()
@@ -1709,12 +1828,15 @@ if localPlayer then
 		followOwners()
 		makeStandSpeak(getgenv().Configuration.Msg)
 	end
+
 	local success, err = pcall(function()
 		setupChatListeners()
 	end)
+
 	if not success then
 		warn("Failed to setup listeners: "..tostring(err))
 	end
+
 	script.Destroying:Connect(function()
 		dismissStand()
 		stopSus()
