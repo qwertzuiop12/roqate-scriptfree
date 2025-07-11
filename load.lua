@@ -1,5 +1,4 @@
 
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -1247,39 +1246,17 @@ end
 
 local function processCommandOriginal(speaker, message)
     if not message then return end
-    local commandPrefix = message:match("^[%.!]")
+    local commandPrefix = message:match("^%.")
     if not commandPrefix then return end
+    
     if tick() - lastCommandTime < commandDelay then return end
     lastCommandTime = tick()
-
-    if speaker ~= localPlayer then
-        if not hasAdminPermissions(speaker) then
-            local mainOwner = getMainOwner()
-            local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
-            makeStandSpeak("Hey "..speaker.Name..", you can't use commands. Type .pricing or .freetrial")
-            return
-        end
-
-        if checkCommandAbuse(speaker) then return end
-    end
-
-    if rudePlayers[speaker.Name] and not message:lower():find("sorry") then
-        return
-    end
-
+    
     local args = {}
     for word in message:gmatch("%S+") do
         table.insert(args, word)
     end
     local cmd = args[1]:lower()
-
-    if isCommandDisabled(cmd) and not (cmd == ".disable" or cmd == ".enable") then
-        local mainOwner = getMainOwner()
-        if not mainOwner or speaker.Name ~= mainOwner.Name then
-            makeStandSpeak("This command is currently disabled!")
-            return
-        end
-    end
 
     if cmd == ".stopcmds" then
         stopActiveCommand()
@@ -1561,6 +1538,10 @@ local function processCommand(speaker, message)
         showPricing(speaker)
         return
     elseif cmd == ".freetrial" then
+        if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
+            makeStandSpeak("You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
+            return
+        end
         if not isFreeTrial(speaker) then
             table.insert(getgenv().FreeTrial, speaker.Name)
             makeStandSpeak("Thanks for redeeming free trial! You have 5 minutes to use commands. Type .commands to see available commands")
@@ -1583,9 +1564,6 @@ local function processCommand(speaker, message)
         makeStandSpeak("This command is currently disabled")
         return
     end
-    
-    if tick() - lastCommandTime < commandDelay then return end
-    lastCommandTime = tick()
     
     processCommandOriginal(speaker, message)
 end
