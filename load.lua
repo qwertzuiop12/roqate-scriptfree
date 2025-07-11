@@ -114,26 +114,32 @@ local function processFreeTrial(player)
 end
 
 local function showPricing(speaker)
-	-- First list all pricing options
-	makeStandSpeak("Admin: 100 Robux or 1 godly - Basic commands")
-	task.wait(1)
-	makeStandSpeak("Head Admin: 500 Robux or 5 godly - Can sell admin to others")
-	task.wait(1)
-	makeStandSpeak("Type !freetrial to try commands for 5 minutes")
-	task.wait(1)
+	-- Simple message sending without fancy formatting
+	local messages = {
+		"Admin costs 100 Robux or 1 godly (Basic commands)",
+		"Head Admin costs 500 Robux or 5 godly (Can sell admin)",
+		"Type !freetrial to test commands for 5 minutes",
+	}
 
-	-- Then list available owners/admins to pay
-	local adminsAvailable = {}
+	-- Send each message with a delay
+	for _, msg in ipairs(messages) do
+		makeStandSpeak(msg)
+		task.wait(1)
+	end
+
+	-- Find available admins/owners
+	local availableAdmins = {}
 	for _, player in ipairs(Players:GetPlayers()) do
 		if isOwner(player) or isHeadAdmin(player) then
-			table.insert(adminsAvailable, player.Name)
+			table.insert(availableAdmins, player.Name)
 		end
 	end
 
-	if #adminsAvailable > 0 then
-		makeStandSpeak("You can pay to: "..table.concat(adminsAvailable, ", "))
+	-- Send admin list message
+	if #availableAdmins > 0 then
+		makeStandSpeak("Available to pay: " .. table.concat(availableAdmins, ", "))
 	else
-		makeStandSpeak("No owners/admins available to pay right now")
+		makeStandSpeak("No admins available right now")
 	end
 end
 
