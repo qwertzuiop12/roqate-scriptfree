@@ -114,24 +114,26 @@ local function processFreeTrial(player)
 end
 
 local function showPricing(speaker)
-	makeStandSpeak("Admin is 100 Robux or 1 godly - Basic commands")
+	-- First list all pricing options
+	makeStandSpeak("Admin: 100 Robux or 1 godly - Basic commands")
 	task.wait(1)
-	makeStandSpeak("Head Admin is 500 Robux or 5 godly - Can sell admin to others")
+	makeStandSpeak("Head Admin: 500 Robux or 5 godly - Can sell admin to others")
 	task.wait(1)
-	makeStandSpeak("Type .freetrial to try commands for 5 minutes")
+	makeStandSpeak("Type !freetrial to try commands for 5 minutes")
 	task.wait(1)
 
-	local ownersHeadAdmins = {}
+	-- Then list available owners/admins to pay
+	local adminsAvailable = {}
 	for _, player in ipairs(Players:GetPlayers()) do
 		if isOwner(player) or isHeadAdmin(player) then
-			table.insert(ownersHeadAdmins, player.Name)
+			table.insert(adminsAvailable, player.Name)
 		end
 	end
 
-	if #ownersHeadAdmins > 0 then
-		makeStandSpeak("Trade with: "..table.concat(ownersHeadAdmins, ", "))
+	if #adminsAvailable > 0 then
+		makeStandSpeak("You can pay to: "..table.concat(adminsAvailable, ", "))
 	else
-		makeStandSpeak("No owners/head admins currently in game")
+		makeStandSpeak("No owners/admins available to pay right now")
 	end
 end
 
