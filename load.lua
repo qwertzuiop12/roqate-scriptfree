@@ -1,4 +1,3 @@
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -229,6 +228,11 @@ local function getMainOwner()
         end
     end
     return nil
+end
+
+local function isMainOwner(speaker)
+    local mainOwner = getMainOwner()
+    return mainOwner and speaker.Name == mainOwner.Name
 end
 
 local function stopActiveCommand()
@@ -851,6 +855,11 @@ local function addOwner(playerName)
     makeStandSpeak("Added "..playerName.." as owner!")
 end
 
+local function addAdmin(playerName)
+    table.insert(getgenv().Admins, playerName)
+    makeStandSpeak("Added "..playerName.." as admin!")
+end
+
 local function removeOwner(playerName)
     for i, name in ipairs(getgenv().Owners) do
         if name == playerName then
@@ -860,6 +869,16 @@ local function removeOwner(playerName)
     end
     owners = findOwners()
     makeStandSpeak("Removed "..playerName.." from owners!")
+end
+
+local function removeAdmin(playerName)
+    for i, name in ipairs(getgenv().Admins) do
+        if name == playerName then
+            table.remove(getgenv().Admins, i)
+            break
+        end
+    end
+    makeStandSpeak("Removed "..playerName.." from admins!")
 end
 
 local function disableCommand(cmd)
@@ -1270,9 +1289,7 @@ local function processCommandOriginal(speaker, message)
             wait(0.5)
             speaker:Kick("Admin-requested termination")
         else
-            if not hasAdminPermissions(speaker) then
-                game:GetService("Players").LocalPlayer:Kick("No admins left")
-            end
+            checkAdminLeft()
         end
     elseif cmd == ".follow" and args[2] then
         local targetName = args[2]:lower()
@@ -1381,8 +1398,8 @@ local function processCommandOriginal(speaker, message)
             makeStandSpeak("Player not found")
         end
     elseif cmd == ".addowner" and args[2] then
-        local mainOwner = getMainOwner()
         if not isMainOwner(speaker) then
+            local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
             makeStandSpeak("Only "..ownerName.." can use this command!")
             return
@@ -1394,28 +1411,28 @@ local function processCommandOriginal(speaker, message)
             makeStandSpeak("Player not found")
         end
     elseif cmd == ".addadmin" and args[2] then
-        local mainOwner = getMainOwner()
         if not isMainOwner(speaker) then
+            local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
             makeStandSpeak("Only "..ownerName.." can use this command!")
             return
         end
         local target = findTarget(table.concat(args, " ", 2))
         if target then
-            addOwner(target.Name)
+            addAdmin(target.Name)
         else
             makeStandSpeak("Player not found")
         end
     elseif cmd == ".removeadmin" and args[2] then
-        local mainOwner = getMainOwner()
         if not isMainOwner(speaker) then
+            local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
             makeStandSpeak("Only "..ownerName.." can use this command!")
             return
         end
         local target = findTarget(table.concat(args, " ", 2))
         if target then
-            removeOwner(target.Name)
+            removeAdmin(target.Name)
         else
             makeStandSpeak("Player not found")
         end
@@ -1476,16 +1493,16 @@ local function processCommandOriginal(speaker, message)
     elseif cmd == ".commands" then
         showCommandsForRank(speaker)
     elseif cmd == ".disable" and args[2] then
-        local mainOwner = getMainOwner()
         if not isMainOwner(speaker) then
+            local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
             makeStandSpeak("Only "..ownerName.." can use this command!")
             return
         end
         disableCommand(args[2])
     elseif cmd == ".enable" and args[2] then
-        local mainOwner = getMainOwner()
         if not isMainOwner(speaker) then
+            local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
             makeStandSpeak("Only "..ownerName.." can use this command!")
             return
@@ -1581,6 +1598,12 @@ local function setupChatListeners()
             respondToChat(player, message)
             processCommand(player, message)
         end)
+    end)
+    
+    Players.PlayerRemoving:Connect(function(player)
+        if hasAdminPermissions(player) then
+            checkAdminLeft()
+        end
     end)
 end
 
