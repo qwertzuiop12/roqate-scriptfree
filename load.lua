@@ -42,6 +42,8 @@ local rudePlayers = {}
 local rudePhrases = {"pmo", "sybau", "syfm", "stfu", "kys", "idc", "suck my","shut"}
 local randomTargets = {}
 local activeCommand = nil
+local susBlock = nil
+local followBlock = nil
 
 local function isOwner(player)
     for _, ownerName in ipairs(getgenv().Owners) do
@@ -277,6 +279,32 @@ local function createStandPlatform()
     standPlatform.Size = Vector3.new(4, 1, 4)
     standPlatform.Parent = workspace
     return standPlatform
+end
+
+local function createSusBlock()
+    if susBlock then susBlock:Destroy() end
+    susBlock = Instance.new("Part")
+    susBlock.Name = "SusBlock"
+    susBlock.Anchored = true
+    susBlock.CanCollide = true
+    susBlock.Transparency = 0.5
+    susBlock.Color = Color3.fromRGB(255, 0, 0)
+    susBlock.Size = Vector3.new(4, 1, 4)
+    susBlock.Parent = workspace
+    return susBlock
+end
+
+local function createFollowBlock()
+    if followBlock then followBlock:Destroy() end
+    followBlock = Instance.new("Part")
+    followBlock.Name = "FollowBlock"
+    followBlock.Anchored = true
+    followBlock.CanCollide = true
+    followBlock.Transparency = 0.5
+    followBlock.Color = Color3.fromRGB(0, 255, 0)
+    followBlock.Size = Vector3.new(4, 1, 4)
+    followBlock.Parent = workspace
+    return followBlock
 end
 
 local function createHidePlatform()
@@ -525,6 +553,7 @@ local function followOwners()
         heartbeatConnection:Disconnect()
     end
     createStandPlatform()
+    createFollowBlock()
     disablePlayerMovement()
     playStandAnimation()
     heartbeatConnection = RunService.Heartbeat:Connect(function()
@@ -539,6 +568,9 @@ local function followOwners()
                     myRoot.CFrame = myRoot.CFrame:Lerp(targetCF, MOVEMENT_SMOOTHNESS)
                     if standPlatform then
                         standPlatform.CFrame = CFrame.new(myRoot.Position - Vector3.new(0, 3, 0))
+                    end
+                    if followBlock then
+                        followBlock.CFrame = CFrame.new(ownerRoot.Position - Vector3.new(0, 3, 0))
                     end
                     break
                 end
@@ -595,6 +627,14 @@ local function dismissStand()
         standPlatform:Destroy()
         standPlatform = nil
     end
+    if susBlock then
+        susBlock:Destroy()
+        susBlock = nil
+    end
+    if followBlock then
+        followBlock:Destroy()
+        followBlock = nil
+    end
     if standAnimTrack then
         standAnimTrack:Stop()
         standAnimTrack = nil
@@ -615,6 +655,8 @@ end
 
 local function resetStand()
     if standPlatform then standPlatform:Destroy() end
+    if susBlock then susBlock:Destroy() end
+    if followBlock then followBlock:Destroy() end
     if yeetForce then yeetForce:Destroy() end
     flinging = false
     if localPlayer.Character then
@@ -657,6 +699,10 @@ local function stopSus()
         standAnimTrack = nil
     end
     susTarget = nil
+    if susBlock then
+        susBlock:Destroy()
+        susBlock = nil
+    end
     if workspace.CurrentCamera then
         workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
         if localPlayer.Character then
@@ -704,6 +750,8 @@ local function startSus(targetPlayer, speed)
         camera.CameraType = Enum.CameraType.Scriptable
     end
 
+    createSusBlock()
+
     susConnection = RunService.RenderStepped:Connect(function()
         if activeCommand ~= "sus" or not susTarget or not susTarget.Character or not localPlayer.Character then
             stopSus()
@@ -717,6 +765,10 @@ local function startSus(targetPlayer, speed)
         local lookVector = targetRoot.CFrame.LookVector
         local targetPos = targetRoot.Position - (lookVector * 2)
         myRoot.CFrame = CFrame.new(targetPos, targetRoot.Position)
+
+        if susBlock then
+            susBlock.CFrame = CFrame.new(targetRoot.Position - Vector3.new(0, 3, 0))
+        end
 
         if camera and camera.CameraType == Enum.CameraType.Scriptable then
             camera.CFrame = CFrame.new(myRoot.Position + Vector3.new(0, 3, -5), myRoot.Position)
