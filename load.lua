@@ -151,24 +151,24 @@ local function showCommandsForRank(speaker)
 	local commands = {
 		owner = {
 			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
-			".fling", ".stealgun", ".whitelist", ".addowner", ".addadmin", ".removeadmin", 
+			".fling", ".bringgun", ".whitelist", ".addowner", ".addadmin", ".removeadmin", 
 			".sus", ".stopsus", ".eliminate", ".win", ".commands", ".disable", ".enable", 
-			".stopcmds", ".rejoin", ".quit", ".describe", ".headadmin", ".pricing", ".freetrial", ".trade", ".eliminateall"
+			".stopcmds", ".rejoin", ".quit", ".describe", ".headadmin", ".pricing", ".freetrial", ".trade", ".eliminateall", ".shoot", ".breakgun", ".fireshot"
 		},
 		headadmin = {
 			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
-			".fling", ".stealgun", ".whitelist", ".addadmin", ".sus", ".stopsus", 
-			".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe", ".pricing", ".freetrial", ".trade"
+			".fling", ".bringgun", ".whitelist", ".addadmin", ".sus", ".stopsus", 
+			".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe", ".pricing", ".freetrial", ".trade", ".shoot", ".breakgun", ".fireshot"
 		},
 		admin = {
 			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
-			".fling", ".stealgun", ".sus", ".stopsus", ".eliminate", ".win", 
-			".commands", ".stopcmds", ".describe", ".pricing", ".freetrial", ".trade"
+			".fling", ".bringgun", ".sus", ".stopsus", ".eliminate", ".win", 
+			".commands", ".stopcmds", ".describe", ".pricing", ".freetrial", ".trade", ".shoot", ".breakgun", ".fireshot"
 		},
 		freetrial = {
 			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
-			".fling", ".stealgun", ".sus", ".stopsus", ".eliminate", ".win", 
-			".commands", ".stopcmds", ".describe", ".pricing"
+			".fling", ".bringgun", ".sus", ".stopsus", ".eliminate", ".win", 
+			".commands", ".stopcmds", ".describe", ".pricing", ".shoot", ".breakgun", ".fireshot"
 		}
 	}
 
@@ -930,7 +930,6 @@ end
 local function stealGun(speaker)
 	if not localPlayer.Character then return end
 
-	-- First teleport to the gun location
 	local gunDrop = findGunDrop()
 	if not gunDrop then
 		makeStandSpeak("Gun is not on the floor yet!")
@@ -941,11 +940,9 @@ local function stealGun(speaker)
 	local myRoot = getRoot(localPlayer.Character)
 	if not myRoot then return end
 
-	-- Teleport to gun
 	myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
 	task.wait(0.5)
 
-	-- Now teleport to player who requested
 	if speaker and speaker.Character then
 		local speakerRoot = getRoot(speaker.Character)
 		if speakerRoot then
@@ -955,6 +952,126 @@ local function stealGun(speaker)
 		end
 	end
 end
+
+local function shootPlayer(targetPlayer)
+	if not targetPlayer or targetPlayer == localPlayer then return end
+	
+	local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+	if not gun then
+		local gunDrop = findGunDrop()
+		if gunDrop then
+			local myRoot = getRoot(localPlayer.Character)
+			if myRoot then
+				myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
+				task.wait(0.5)
+				gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+			end
+		end
+	end
+	
+	if not gun then
+		makeStandSpeak("No gun found!")
+		return
+	end
+
+	makeStandSpeak("Shooting "..targetPlayer.Name.."!")
+	
+	local targetRoot = getRoot(targetPlayer.Character)
+	local myRoot = getRoot(localPlayer.Character)
+	if not targetRoot or not myRoot then return end
+	
+	local originalPos = myRoot.CFrame
+	myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -2)
+	
+	if workspace.CurrentCamera then
+		workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+		workspace.CurrentCamera.CFrame = CFrame.new(myRoot.Position + Vector3.new(0, 3, -5), myRoot.Position)
+	end
+	
+	gun.Parent = localPlayer.Character
+	
+	local args = {
+		1,
+		targetRoot.Position,
+		"AH2"
+	}
+	
+	local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+	if remote then
+		remote:InvokeServer(unpack(args))
+	end
+	
+	task.wait(0.2)
+	
+	if workspace.CurrentCamera then
+		workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+	end
+	
+	myRoot.CFrame = originalPos
+end
+
+local function breakGun()
+	local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+	if not gun then
+		local gunDrop = findGunDrop()
+		if gunDrop then
+			local myRoot = getRoot(localPlayer.Character)
+			if myRoot then
+				myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
+				task.wait(0.5)
+				gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+			end
+		end
+	end
+	
+	if not gun then
+		makeStandSpeak("No gun found!")
+		return
+	end
+
+	makeStandSpeak("Breaking gun!")
+	
+	gun.Parent = localPlayer.Character
+	
+	local args = {
+		1,
+		Vector3.new(math.huge, math.huge, math.huge),
+		"AH2"
+	}
+	
+	local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+	if remote then
+		remote:InvokeServer(unpack(args))
+	end
+end
+
+local function fireShot(targetPlayer)
+	if not targetPlayer or targetPlayer == localPlayer then return end
+	
+	if not targetPlayer.Character then return end
+	
+	local gun = targetPlayer.Backpack:FindFirstChild("Gun") or targetPlayer.Character:FindFirstChild("Gun")
+	if not gun then
+		makeStandSpeak(targetPlayer.Name.." doesn't have a gun!")
+		return
+	end
+
+	makeStandSpeak("Forcing "..targetPlayer.Name.." to fire!")
+	
+	local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+	if remote then
+		local targetRoot = getRoot(targetPlayer.Character)
+		if targetRoot then
+			local args = {
+				1,
+				targetRoot.Position + Vector3.new(0, 100, 0),
+				"AH2"
+			}
+			remote:InvokeServer(unpack(args))
+		end
+	end
+end
+
 local function tradePlayer(targetPlayer)
 	if not targetPlayer then return end
 	makeStandSpeak("Sending trade request to "..targetPlayer.Name)
@@ -1209,10 +1326,11 @@ local function showCommands(speaker)
 
 	local commandGroups = {
 		".follow (user/murder/sheriff/random), .protect (on/off), .say (message), .reset, .hide",
-		".dismiss, .summon, .fling (all/sheriff/murder/user/random), .stealgun, .whitelist (user)",
+		".dismiss, .summon, .fling (all/sheriff/murder/user/random), .bringgun, .whitelist (user)",
 		".addowner (user), .removeadmin (user), .sus (user/murder/sheriff/random) (speed), .stopsus",
 		".eliminate (random), .win (user), .commands, .disable (cmd), .enable (cmd), .stopcmds, .rejoin",
-		".describe (user/murd/sheriff), .headadmin (user), .pricing, .freetrial, .trade (user), .eliminateall"
+		".describe (user/murd/sheriff), .headadmin (user), .pricing, .freetrial, .trade (user), .eliminateall",
+		".shoot (user/murd), .breakgun, .fireshot (user)"
 	}
 
 	for _, group in ipairs(commandGroups) do
@@ -1524,7 +1642,7 @@ local function processCommandOriginal(speaker, message)
 				makeStandSpeak("Target not found")
 			end
 		end
-	elseif cmd == ".stealgun" then
+	elseif cmd == ".bringgun" then
 		stealGun(speaker)
 	elseif cmd == ".whitelist" and args[2] then
 		local target = findTarget(table.concat(args, " ", 2))
@@ -1664,6 +1782,32 @@ local function processCommandOriginal(speaker, message)
 		for _, msg in ipairs(messages) do
 			makeStandSpeak(msg)
 			task.wait(1.5)
+		end
+	elseif cmd == ".shoot" and args[2] then
+		local targetName = args[2]:lower()
+		if targetName == "murder" then
+			local target = findPlayerWithTool("Knife")
+			if target then
+				shootPlayer(target)
+			else
+				makeStandSpeak("No murderer found")
+			end
+		else
+			local target = findTarget(table.concat(args, " ", 2))
+			if target then
+				shootPlayer(target)
+			else
+				makeStandSpeak("Target not found")
+			end
+		end
+	elseif cmd == ".breakgun" then
+		breakGun()
+	elseif cmd == ".fireshot" and args[2] then
+		local target = findTarget(table.concat(args, " ", 2))
+		if target then
+			fireShot(target)
+		else
+			makeStandSpeak("Player not found")
 		end
 	elseif cmd == "!pricing" then
 		showPricing(speaker)
