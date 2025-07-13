@@ -153,22 +153,22 @@ local function showCommandsForRank(speaker)
 			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
 			".fling", ".bringgun", ".whitelist", ".addowner", ".addadmin", ".removeadmin", 
 			".sus", ".stopsus", ".eliminate", ".win", ".commands", ".disable", ".enable", 
-			".stopcmds", ".rejoin", ".quit", ".describe", ".headadmin", ".pricing", ".freetrial", ".trade", ".eliminateall", ".shoot", ".breakgun", ".fireshot"
+			".stopcmds", ".rejoin", ".quit", ".describe", ".headadmin", ".pricing", ".freetrial", ".trade", ".eliminateall", ".shoot"
 		},
 		headadmin = {
 			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
 			".fling", ".bringgun", ".whitelist", ".addadmin", ".sus", ".stopsus", 
-			".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe", ".pricing", ".freetrial", ".trade", ".shoot", ".breakgun", ".fireshot"
+			".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe", ".pricing", ".freetrial", ".trade", ".shoot"
 		},
 		admin = {
 			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
 			".fling", ".bringgun", ".sus", ".stopsus", ".eliminate", ".win", 
-			".commands", ".stopcmds", ".describe", ".pricing", ".freetrial", ".trade", ".shoot", ".breakgun", ".fireshot"
+			".commands", ".stopcmds", ".describe", ".pricing", ".freetrial", ".trade", ".shoot"
 		},
 		freetrial = {
 			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
 			".fling", ".bringgun", ".sus", ".stopsus", ".eliminate", ".win", 
-			".commands", ".stopcmds", ".describe", ".pricing", ".shoot", ".breakgun", ".fireshot"
+			".commands", ".stopcmds", ".describe", ".pricing", ".shoot"
 		}
 	}
 
@@ -865,15 +865,25 @@ local function eliminateAllPlayers(speaker)
 	local knife = localPlayer.Character:FindFirstChild("Knife")
 	if not knife then return end
 
-	if not speaker or not speaker.Character then return end
-	local speakerRoot = getRoot(speaker.Character)
-	if not speakerRoot then return end
-
 	local myRoot = getRoot(localPlayer.Character)
 	if not myRoot then return end
 
-	local safeSpot = speakerRoot.CFrame * CFrame.new(0, 10, 0)
-	myRoot.CFrame = safeSpot
+	local spinSpeed = 5
+	local stabPlatform = Instance.new("Part")
+	stabPlatform.Name = "StabPlatform"
+	stabPlatform.Anchored = true
+	stabPlatform.CanCollide = true
+	stabPlatform.Transparency = 0.5
+	stabPlatform.Color = Color3.fromRGB(255, 0, 0)
+	stabPlatform.Size = Vector3.new(20, 1, 20)
+	stabPlatform.Parent = workspace
+	stabPlatform.CFrame = myRoot.CFrame * CFrame.new(0, 10, 0)
+
+	local spinConnection = RunService.Heartbeat:Connect(function()
+		myRoot.CFrame = myRoot.CFrame * CFrame.Angles(0, math.rad(spinSpeed), 0)
+		spinSpeed = spinSpeed + 0.1
+		stabPlatform.CFrame = myRoot.CFrame * CFrame.new(0, 10, 0)
+	end)
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
@@ -882,7 +892,7 @@ local function eliminateAllPlayers(speaker)
 				local targetRoot = getRoot(player.Character)
 				if targetRoot then
 					targetRoot.Anchored = true
-					targetRoot.CFrame = speakerRoot.CFrame * CFrame.new(math.random(-5,5), 0, math.random(-5,5))
+					targetRoot.CFrame = stabPlatform.CFrame * CFrame.new(math.random(-8,8), 0, math.random(-8,8))
 				end
 			end
 		end
@@ -901,6 +911,9 @@ local function eliminateAllPlayers(speaker)
 			end
 		end
 	end
+
+	spinConnection:Disconnect()
+	stabPlatform:Destroy()
 
 	if knife then knife.Parent = localPlayer.Backpack end
 	makeStandSpeak("GG, elimination complete!")
@@ -990,7 +1003,7 @@ local function shootPlayer(targetPlayer)
 		return
 	end
 
-	makeStandSpeak("Shooting "..targetPlayer.Name.."!")
+	makeStandSpeak("Preparing to shoot "..targetPlayer.Name.."!")
 	
 	local targetRoot = getRoot(targetPlayer.Character)
 	local myRoot = getRoot(localPlayer.Character)
@@ -1000,6 +1013,35 @@ local function shootPlayer(targetPlayer)
 	local safeSpot = targetRoot.CFrame * CFrame.new(0, 10, 0)
 	myRoot.CFrame = safeSpot
 	
+	local predictionBlock = Instance.new("Part")
+	predictionBlock.Name = "PredictionBlock"
+	predictionBlock.Anchored = true
+	predictionBlock.CanCollide = true
+	predictionBlock.Transparency = 0.7
+	predictionBlock.Color = Color3.fromRGB(0, 255, 255)
+	predictionBlock.Size = Vector3.new(4, 1, 4)
+	predictionBlock.Parent = workspace
+	
+	local lastPosition = targetRoot.Position
+	local velocity = Vector3.new()
+	local lastUpdate = tick()
+	
+	local trackingConnection = RunService.Heartbeat:Connect(function()
+		local now = tick()
+		local delta = now - lastUpdate
+		if delta > 0 then
+			local currentPosition = targetRoot.Position
+			velocity = (currentPosition - lastPosition) / delta
+			lastPosition = currentPosition
+			
+			local predictedPosition = currentPosition + velocity * 0.3
+			predictionBlock.CFrame = CFrame.new(predictedPosition - Vector3.new(0, 3, 0))
+		end
+		lastUpdate = now
+	end)
+	
+	task.wait(1)
+	
 	if workspace.CurrentCamera then
 		workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
 		workspace.CurrentCamera.CFrame = CFrame.new(myRoot.Position + Vector3.new(0, 3, -5), myRoot.Position)
@@ -1007,9 +1049,12 @@ local function shootPlayer(targetPlayer)
 	
 	gun.Parent = localPlayer.Character
 	
+	local torso = targetPlayer.Character:FindFirstChild("Torso") or targetPlayer.Character:FindFirstChild("UpperTorso")
+	local targetPosition = torso and torso.Position or targetRoot.Position
+	
 	local args = {
 		1,
-		targetRoot.Position,
+		targetPosition,
 		"AH2"
 	}
 	
@@ -1020,81 +1065,14 @@ local function shootPlayer(targetPlayer)
 	
 	task.wait(0.2)
 	
+	trackingConnection:Disconnect()
+	predictionBlock:Destroy()
+	
 	if workspace.CurrentCamera then
 		workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
 	end
 	
 	myRoot.CFrame = originalPos
-end
-
-local function breakGun(targetPlayer)
-	if not targetPlayer or not targetPlayer.Character then return end
-	
-	makeStandSpeak("Breaking gun on "..targetPlayer.Name.."!")
-	
-	local gun = targetPlayer.Backpack:FindFirstChild("Gun") or targetPlayer.Character:FindFirstChild("Gun")
-	if gun then
-		for i = 1, 20 do
-			local args = {
-				1,
-				Vector3.new(math.random(-10000, 10000), math.random(-10000, 10000), math.random(-10000, 10000)),
-				"AH2"
-			}
-			local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-			if remote then
-				remote:InvokeServer(unpack(args))
-			end
-			task.wait(0.1)
-		end
-	else
-		makeStandSpeak("No gun found on "..targetPlayer.Name)
-	end
-end
-
-local function fireShot(targetPlayer)
-	if not targetPlayer or not targetPlayer.Character then return end
-	
-	local shooter = nil
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player ~= localPlayer and player.Character then
-			local gun = player.Backpack:FindFirstChild("Gun") or player.Character:FindFirstChild("Gun")
-			if gun then
-				shooter = player
-				break
-			end
-		end
-	end
-	
-	if not shooter then
-		makeStandSpeak("No one is holding a gun!")
-		return
-	end
-	
-	local shooterRoot = getRoot(shooter.Character)
-	local targetRoot = getRoot(targetPlayer.Character)
-	if not shooterRoot or not targetRoot then return end
-	
-	local distance = (shooterRoot.Position - targetRoot.Position).Magnitude
-	if distance > 30 then
-		makeStandSpeak(shooter.Name.." is too far from "..targetPlayer.Name.."!")
-		return
-	end
-
-	makeStandSpeak("Forcing "..shooter.Name.." to shoot "..targetPlayer.Name.."!")
-	
-	local gun = shooter.Backpack:FindFirstChild("Gun") or shooter.Character:FindFirstChild("Gun")
-	if not gun then return end
-	
-	local args = {
-		1,
-		targetRoot.Position,
-		"AH2"
-	}
-	
-	local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-	if remote then
-		remote:InvokeServer(unpack(args))
-	end
 end
 
 local function tradePlayer(targetPlayer)
@@ -1355,7 +1333,7 @@ local function showCommands(speaker)
 		".addowner (user), .removeadmin (user), .sus (user/murder/sheriff/random) (speed), .stopsus",
 		".eliminate (random), .win (user), .commands, .disable (cmd), .enable (cmd), .stopcmds, .rejoin",
 		".describe (user/murd/sheriff), .headadmin (user), .pricing, .freetrial, .trade (user), .eliminateall",
-		".shoot (user/murd), .breakgun (user), .fireshot (user/murd)"
+		".shoot (user/murd)"
 	}
 
 	for _, group in ipairs(commandGroups) do
@@ -1821,40 +1799,6 @@ local function processCommandOriginal(speaker, message)
 			local target = findTarget(table.concat(args, " ", 2))
 			if target then
 				shootPlayer(target)
-			else
-				makeStandSpeak("Target not found")
-			end
-		end
-	elseif cmd == ".breakgun" and args[2] then
-		local targetName = args[2]:lower()
-		if targetName == "murder" then
-			local target = findPlayerWithTool("Knife")
-			if target then
-				breakGun(target)
-			else
-				makeStandSpeak("No murderer found")
-			end
-		else
-			local target = findTarget(table.concat(args, " ", 2))
-			if target then
-				breakGun(target)
-			else
-				makeStandSpeak("Target not found")
-			end
-		end
-	elseif cmd == ".fireshot" and args[2] then
-		local targetName = args[2]:lower()
-		if targetName == "murder" then
-			local target = findPlayerWithTool("Knife")
-			if target then
-				fireShot(target)
-			else
-				makeStandSpeak("No murderer found")
-			end
-		else
-			local target = findTarget(table.concat(args, " ", 2))
-			if target then
-				fireShot(target)
 			else
 				makeStandSpeak("Target not found")
 			end
