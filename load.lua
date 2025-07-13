@@ -875,7 +875,6 @@ local function eliminateAllPlayers(speaker)
 		return
 	end
 
-	makeStandSpeak("Executing all players!")
 	for i = 1, 50 do
 		simulateClick()
 		task.wait(0.05)
@@ -1971,6 +1970,5 @@ if localPlayer then
 else
 	warn("LocalPlayer not found!")
 end
-
 
 
