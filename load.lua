@@ -121,17 +121,17 @@ local function showPricing(speaker)
 	coroutine.wrap(function()
 		-- Pricing information
 		makeStandSpeak("Admin costs 100 Robux or 1 godly (Basic commands)")
-		task.wait(1.5)  -- Increased delay between messages
+		task.wait(1)
 		makeStandSpeak("Head Admin costs 500 Robux or 5 godly (Can sell admin)")
-		task.wait(1.5)
+		task.wait(1)
 		makeStandSpeak("Type !freetrial to test commands for 5 minutes")
-		task.wait(1.5)
+		task.wait(1)
 
 		-- Get available admins with proper validation
 		local availableAdmins = {}
 		for _, player in ipairs(Players:GetPlayers()) do
 			if player and player.Parent and (isOwner(player) or isHeadAdmin(player)) then
-				table.insert(availableAdmins, player.DisplayName or player.Name)
+				table.insert(availableAdmins, player.Name)
 			end
 		end
 
@@ -144,6 +144,21 @@ local function showPricing(speaker)
 		end
 	end)()
 end
+
+local function showCommandsForRank(speaker)
+	local rank = ""
+	if isOwner(speaker) then
+		rank = "owner"
+	elseif isHeadAdmin(speaker) then
+		rank = "headadmin"
+	elseif isAdmin(speaker) then
+		rank = "admin"
+	elseif isFreeTrial(speaker) then
+		rank = "freetrial"
+	else
+		makeStandSpeak("You don't have permission to use commands. Type .pricing or .freetrial")
+		return
+	end
 
 	local commands = {
 		owner = {
@@ -176,7 +191,7 @@ end
 		end
 		makeStandSpeak(cmd)
 	end
-
+end
 
 local function checkCommandPermissions(speaker, cmd)
 	if isOwner(speaker) then return true end
@@ -1973,6 +1988,5 @@ if localPlayer then
 else
 	warn("LocalPlayer not found!")
 end
-
 
 
