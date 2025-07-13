@@ -930,6 +930,21 @@ end
 local function stealGun(speaker)
 	if not localPlayer.Character then return end
 
+	local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+	if gun then
+		if speaker and speaker.Character then
+			local speakerRoot = getRoot(speaker.Character)
+			if speakerRoot then
+				local myRoot = getRoot(localPlayer.Character)
+				if myRoot then
+					myRoot.CFrame = speakerRoot.CFrame * CFrame.new(0, 0, -2)
+					resetStand()
+				end
+			end
+		end
+		return
+	end
+
 	local gunDrop = findGunDrop()
 	if not gunDrop then
 		makeStandSpeak("Gun is not on the floor yet!")
@@ -954,7 +969,7 @@ local function stealGun(speaker)
 end
 
 local function shootPlayer(targetPlayer)
-	if not targetPlayer or targetPlayer == localPlayer then return end
+	if not targetPlayer or not targetPlayer.Character then return end
 	
 	local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
 	if not gun then
@@ -1010,28 +1025,10 @@ local function shootPlayer(targetPlayer)
 	myRoot.CFrame = originalPos
 end
 
-local function breakGun()
-	local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-	if not gun then
-		local gunDrop = findGunDrop()
-		if gunDrop then
-			local myRoot = getRoot(localPlayer.Character)
-			if myRoot then
-				myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
-				task.wait(0.5)
-				gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-			end
-		end
-	end
+local function breakGun(targetPlayer)
+	if not targetPlayer or not targetPlayer.Character then return end
 	
-	if not gun then
-		makeStandSpeak("No gun found!")
-		return
-	end
-
-	makeStandSpeak("Breaking gun!")
-	
-	gun.Parent = localPlayer.Character
+	makeStandSpeak("Breaking gun on "..targetPlayer.Name.."!")
 	
 	local args = {
 		1,
@@ -1039,36 +1036,57 @@ local function breakGun()
 		"AH2"
 	}
 	
-	local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-	if remote then
-		remote:InvokeServer(unpack(args))
+	local gun = targetPlayer.Backpack:FindFirstChild("Gun") or targetPlayer.Character:FindFirstChild("Gun")
+	if gun then
+		local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+		if remote then
+			remote:InvokeServer(unpack(args))
+		end
 	end
 end
 
 local function fireShot(targetPlayer)
-	if not targetPlayer or targetPlayer == localPlayer then return end
+	if not targetPlayer or not targetPlayer.Character then return end
 	
-	if not targetPlayer.Character then return end
+	local shooter = nil
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= localPlayer and player.Character then
+			local gun = player.Backpack:FindFirstChild("Gun") or player.Character:FindFirstChild("Gun")
+			if gun then
+				shooter = player
+				break
+			end
+		end
+	end
 	
-	local gun = targetPlayer.Backpack:FindFirstChild("Gun") or targetPlayer.Character:FindFirstChild("Gun")
-	if not gun then
-		makeStandSpeak(targetPlayer.Name.." doesn't have a gun!")
+	if not shooter then
+		makeStandSpeak("No one is holding a gun!")
 		return
 	end
-
-	makeStandSpeak("Forcing "..targetPlayer.Name.." to fire!")
+	
+	local shooterRoot = getRoot(shooter.Character)
+	local targetRoot = getRoot(targetPlayer.Character)
+	if not shooterRoot or not targetRoot then return end
+	
+	if (shooterRoot.Position - targetRoot.Position).Magnitude > 10 then
+		makeStandSpeak(shooter.Name.." is too far from "..targetPlayer.Name.."!")
+		return
+	end
+	
+	makeStandSpeak("Forcing "..shooter.Name.." to shoot "..targetPlayer.Name.."!")
+	
+	local gun = shooter.Backpack:FindFirstChild("Gun") or shooter.Character:FindFirstChild("Gun")
+	if not gun then return end
+	
+	local args = {
+		1,
+		targetRoot.Position,
+		"AH2"
+	}
 	
 	local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
 	if remote then
-		local targetRoot = getRoot(targetPlayer.Character)
-		if targetRoot then
-			local args = {
-				1,
-				targetRoot.Position + Vector3.new(0, 100, 0),
-				"AH2"
-			}
-			remote:InvokeServer(unpack(args))
-		end
+		remote:InvokeServer(unpack(args))
 	end
 end
 
@@ -1330,7 +1348,7 @@ local function showCommands(speaker)
 		".addowner (user), .removeadmin (user), .sus (user/murder/sheriff/random) (speed), .stopsus",
 		".eliminate (random), .win (user), .commands, .disable (cmd), .enable (cmd), .stopcmds, .rejoin",
 		".describe (user/murd/sheriff), .headadmin (user), .pricing, .freetrial, .trade (user), .eliminateall",
-		".shoot (user/murd), .breakgun, .fireshot (user)"
+		".shoot (user/murd), .breakgun (user), .fireshot (user/murd)"
 	}
 
 	for _, group in ipairs(commandGroups) do
@@ -1800,14 +1818,39 @@ local function processCommandOriginal(speaker, message)
 				makeStandSpeak("Target not found")
 			end
 		end
-	elseif cmd == ".breakgun" then
-		breakGun()
-	elseif cmd == ".fireshot" and args[2] then
-		local target = findTarget(table.concat(args, " ", 2))
-		if target then
-			fireShot(target)
+	elseif cmd == ".breakgun" and args[2] then
+		local targetName = args[2]:lower()
+		if targetName == "murder" then
+			local target = findPlayerWithTool("Knife")
+			if target then
+				breakGun(target)
+			else
+				makeStandSpeak("No murderer found")
+			end
 		else
-			makeStandSpeak("Player not found")
+			local target = findTarget(table.concat(args, " ", 2))
+			if target then
+				breakGun(target)
+			else
+				makeStandSpeak("Target not found")
+			end
+		end
+	elseif cmd == ".fireshot" and args[2] then
+		local targetName = args[2]:lower()
+		if targetName == "murder" then
+			local target = findPlayerWithTool("Knife")
+			if target then
+				fireShot(target)
+			else
+				makeStandSpeak("No murderer found")
+			end
+		else
+			local target = findTarget(table.concat(args, " ", 2))
+			if target then
+				fireShot(target)
+			else
+				makeStandSpeak("Target not found")
+			end
 		end
 	elseif cmd == "!pricing" then
 		showPricing(speaker)
