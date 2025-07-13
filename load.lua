@@ -1000,53 +1000,9 @@ local function autoFarm()
 	autoFarmConnection = RunService.Heartbeat:Connect(function()
 		if not autoFarmActive then return end
 
-		-- Check for admin presence
-		local anyAdmin = false
-		for _, player in ipairs(Players:GetPlayers()) do
-			if hasAdminPermissions(player) and player ~= localPlayer then
-				anyAdmin = true
-				break
-			end
-		end
-		if not anyAdmin then return end
-
-		-- Main elimination logic (same as eliminateall)
-		if equipKnife() then
-			local myRoot = getRoot(localPlayer.Character)
-			if myRoot then
-				-- Bring and freeze all players
-				for _, player in ipairs(Players:GetPlayers()) do
-					if player ~= localPlayer and player.Character and not isWhitelisted(player) then
-						local targetRoot = getRoot(player.Character)
-						if targetRoot then
-							targetRoot.Anchored = true
-							targetRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -1)
-						end
-					end
-				end
-
-				-- Spam click
-				for i = 1, 100 do  -- 100 clicks (about 5 seconds worth)
-					simulateClick()
-					task.wait(0.05)
-				end
-
-				-- Unfreeze players
-				for _, player in ipairs(Players:GetPlayers()) do
-					if player ~= localPlayer and player.Character then
-						local targetRoot = getRoot(player.Character)
-						if targetRoot then
-							targetRoot.Anchored = false
-						end
-					end
-				end
-			end
-		end
-
-		-- Additional gun logic for autofarm
+		-- Original effective gun logic
 		local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
 		if not gun then
-			-- Try to get gun if we don't have one
 			local gunDrop = findGunDrop()
 			if gunDrop then
 				local myRoot = getRoot(localPlayer.Character)
@@ -1055,11 +1011,39 @@ local function autoFarm()
 					task.wait(0.5)
 				end
 			end
+		else
+			-- Original working gun targeting
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= localPlayer and player.Character and not isWhitelisted(player) then
+					local knife = player.Character:FindFirstChild("Knife") or 
+						(player.Backpack and player.Backpack:FindFirstChild("Knife"))
+					if knife then
+						shootPlayer(player)
+						break
+					end
+				end
+			end
+		end
+
+		-- Added knife elimination (same as eliminateAllPlayers but only for murderers)
+		if equipKnife() then
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= localPlayer and player.Character and not isWhitelisted(player) then
+					local targetRoot = getRoot(player.Character)
+					local myRoot = getRoot(localPlayer.Character)
+					if targetRoot and myRoot then
+						myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -2)
+						for i = 1, 5 do
+							simulateClick()
+							task.wait(0.01)
+						end
+						break
+					end
+				end
+			end
 		end
 	end)
 end
-
-
 local function tradePlayer(targetPlayer)
     if not targetPlayer then return end
     local args = {
