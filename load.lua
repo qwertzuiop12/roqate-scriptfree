@@ -1917,8 +1917,8 @@ local function processCommand(speaker, message)
 		table.insert(args, word)
 	end
 	cmd = args[1]:lower()
-		if cmd == "!pricing" or cmd == ".pricing" then
-			showPricing(speaker)
+	if cmd == ".pricing" then
+		showPricing(speaker)
 		return
 	elseif cmd == ".freetrial" then
 		if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
@@ -1988,5 +1988,3 @@ if localPlayer then
 else
 	warn("LocalPlayer not found!")
 end
-
-
