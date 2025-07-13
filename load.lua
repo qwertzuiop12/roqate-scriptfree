@@ -1096,6 +1096,7 @@ local function autoFarm()
 				end
 			end
 		else
+			-- Find murderers but skip whitelisted ones
 			local murderer = nil
 			for _, player in ipairs(Players:GetPlayers()) do
 				if player ~= localPlayer and player.Character and not isWhitelisted(player) then
@@ -1988,3 +1989,5 @@ if localPlayer then
 else
 	warn("LocalPlayer not found!")
 end
+
+
