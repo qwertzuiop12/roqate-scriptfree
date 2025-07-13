@@ -45,6 +45,8 @@ local randomTargets = {}
 local activeCommand = nil
 local susBlock = nil
 local followBlock = nil
+local autoFarmActive = false
+local autoFarmConnection = nil
 
 local function isOwner(player)
 	for _, ownerName in ipairs(getgenv().Owners) do
@@ -114,35 +116,14 @@ local function processFreeTrial(player)
 end
 
 local function showPricing(speaker)
-	-- Input validation
-	if not speaker or not speaker:IsA("Player") then return end
-
-	-- Use coroutine to prevent message interruption
-	coroutine.wrap(function()
-		-- Pricing information
-		makeStandSpeak("Admin costs 100 Robux or 1 godly (Basic commands)")
-		task.wait(1)
-		makeStandSpeak("Head Admin costs 500 Robux or 5 godly (Can sell admin)")
-		task.wait(1)
-		makeStandSpeak("Type !freetrial to test commands for 5 minutes")
-		task.wait(1)
-
-		-- Get available admins with proper validation
-		local availableAdmins = {}
-		for _, player in ipairs(Players:GetPlayers()) do
-			if player and player.Parent and (isOwner(player) or isHeadAdmin(player)) then
-				table.insert(availableAdmins, player.Name)
-			end
-		end
-
-		-- Announce available admins
-		if #availableAdmins > 0 then
-			local adminList = table.concat(availableAdmins, ", ")
-			makeStandSpeak("Available admins: " .. adminList)
-		else
-			makeStandSpeak("No admins available right now")
-		end
-	end)()
+	local pricingMessage = {
+		"Admin (100R$ or 1 godly): Basic commands (.follow, .protect, etc)",
+		"Head Admin (500R$ or 5 godly): Can sell admin, more commands",
+		"Pay owners for Head Admin, pay Head Admins or owners for Admin",
+		"Type !freetrial to test commands for 5 minutes"
+	}
+	makeStandSpeak(pricingMessage[1].." | "..pricingMessage[2])
+	makeStandSpeak(pricingMessage[3].." | "..pricingMessage[4])
 end
 
 local function showCommandsForRank(speaker)
@@ -156,7 +137,7 @@ local function showCommandsForRank(speaker)
 	elseif isFreeTrial(speaker) then
 		rank = "freetrial"
 	else
-		makeStandSpeak("You don't have permission to use commands. Type .pricing or .freetrial")
+		makeStandSpeak("You don't have permission to use commands. Type !pricing or !freetrial")
 		return
 	end
 
@@ -178,7 +159,7 @@ local function showCommandsForRank(speaker)
 			".commands", ".stopcmds", ".describe", ".pricing", ".freetrial", ".trade", ".shoot"
 		},
 		freetrial = {
-			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
+			".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon",
 			".fling", ".bringgun", ".sus", ".stopsus", ".eliminate", ".win", 
 			".commands", ".stopcmds", ".describe", ".pricing", ".shoot"
 		}
@@ -793,15 +774,7 @@ end
 local function eliminatePlayers()
 	stopActiveCommand()
 	activeCommand = "eliminate"
-	if not equipKnife() then
-		makeStandSpeak("No knife found!")
-		return
-	end
-	makeStandSpeak("Initiating elimination protocol!")
-	local knife = localPlayer.Character:FindFirstChild("Knife")
-	if not knife then return end
-	local eliminated = {}
-	local startTime = tick()
+	if not equipKnife() then return end
 	while activeCommand == "eliminate" do
 		for _, player in ipairs(Players:GetPlayers()) do
 			if player ~= localPlayer and player.Character then
@@ -821,24 +794,20 @@ local function eliminatePlayers()
 		end
 		task.wait(0.1)
 	end
-	if knife then knife.Parent = localPlayer.Backpack end
-	makeStandSpeak("Good Game!")
+	if localPlayer.Character then
+		local knife = localPlayer.Character:FindFirstChild("Knife")
+		if knife then knife.Parent = localPlayer.Backpack end
+	end
 end
+
 local function eliminateAllPlayers(speaker)
 	stopActiveCommand()
 	activeCommand = "eliminateall"
-
-	if not equipKnife() then
-		makeStandSpeak("No knife found!")
-		return
-	end
-
-	local knife = localPlayer.Character:FindFirstChild("Knife")
-	if not knife then return end
-
+	if not equipKnife() then return end
+	
 	local myRoot = getRoot(localPlayer.Character)
 	if not myRoot then return end
-
+	
 	local platform = Instance.new("Part")
 	platform.Name = "ExecutionPlatform"
 	platform.Anchored = true
@@ -848,38 +817,22 @@ local function eliminateAllPlayers(speaker)
 	platform.Transparency = 0.5
 	platform.Color = Color3.fromRGB(255, 0, 0)
 	platform.Parent = workspace
-
-	local playerCount = 0
+	
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
-			local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 then
-				local targetRoot = getRoot(player.Character)
-				if targetRoot then
-					local position = myRoot.CFrame * CFrame.new(0, 0, -1)
-
-					targetRoot.Anchored = true
-					targetRoot.CFrame = position
-
-					targetRoot.CFrame = platform.CFrame * CFrame.new(0, 3, 0)
-
-					playerCount = playerCount + 1
-				end
+			local targetRoot = getRoot(player.Character)
+			if targetRoot then
+				targetRoot.Anchored = true
+				targetRoot.CFrame = platform.CFrame * CFrame.new(0, 3, 0)
 			end
 		end
 	end
-
-	if playerCount == 0 then
-		makeStandSpeak("No players to eliminate!")
-		platform:Destroy()
-		return
-	end
-
+	
 	for i = 1, 50 do
 		simulateClick()
 		task.wait(0.05)
 	end
-
+	
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
 			local targetRoot = getRoot(player.Character)
@@ -888,16 +841,17 @@ local function eliminateAllPlayers(speaker)
 			end
 		end
 	end
-
+	
 	platform:Destroy()
-	if knife then knife.Parent = localPlayer.Backpack end
-	makeStandSpeak("Execution complete!")
+	if localPlayer.Character then
+		local knife = localPlayer.Character:FindFirstChild("Knife")
+		if knife then knife.Parent = localPlayer.Backpack end
+	end
 end
 
 local function winGame(targetPlayer)
 	stopActiveCommand()
 	if not targetPlayer or targetPlayer == localPlayer then return end
-	makeStandSpeak("Making "..targetPlayer.Name.." the winner!")
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player ~= targetPlayer then
 			flingPlayer(player)
@@ -931,11 +885,7 @@ local function stealGun(speaker)
 		return
 	end
 	local gunDrop = findGunDrop()
-	if not gunDrop then
-		makeStandSpeak("Gun is not on the floor yet!")
-		return
-	end
-	makeStandSpeak("Found gun!")
+	if not gunDrop then return end
 	local myRoot = getRoot(localPlayer.Character)
 	if not myRoot then return end
 	myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
@@ -948,57 +898,6 @@ local function stealGun(speaker)
 			resetStand()
 		end
 	end
-end
-
-local function calculateOptimalShot(targetRoot, shooterRoot)
-	local velocity = targetRoot.Velocity
-	local distance = (targetRoot.Position - shooterRoot.Position).Magnitude
-	local bulletSpeed = 1000
-	local leadTime = distance / bulletSpeed
-	local predictedPosition = targetRoot.Position + (velocity * leadTime)
-	local randomOffset = Vector3.new(
-		math.random(-1, 1),
-		math.random(-0.5, 0.5),
-		math.random(-1, 1)
-	) * 0.5
-	local isJumping = velocity.Y > 2
-	if isJumping then
-		if velocity.Y > 5 then
-			predictedPosition = predictedPosition + Vector3.new(0, 2, 0)
-		end
-	end
-	return predictedPosition + randomOffset
-end
-
-local function isPathClear(startPos, endPos)
-	local direction = (endPos - startPos).Unit
-	local distance = (endPos - startPos).Magnitude
-	local raycastParams = RaycastParams.new()
-	raycastParams.FilterDescendantsInstances = {localPlayer.Character}
-	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-	local raycastResult = workspace:Raycast(startPos, direction * distance, raycastParams)
-	if raycastResult then
-		return false, raycastResult.Position
-	end
-	return true
-end
-
-local function findBestShootingPosition(targetRoot)
-	if not targetRoot then return nil end
-	local positionsToTry = {
-		targetRoot.Position + Vector3.new(0, 5, 0),
-		targetRoot.Position + Vector3.new(0, 0, 5),
-		targetRoot.Position + Vector3.new(5, 0, 0),
-		targetRoot.Position + Vector3.new(-5, 0, 0),
-		targetRoot.Position + Vector3.new(0, 0, -5)
-	}
-	for _, position in ipairs(positionsToTry) do
-		local clear, hitPosition = isPathClear(position, targetRoot.Position)
-		if clear then
-			return position
-		end
-	end
-	return targetRoot.Position + Vector3.new(0, 10, 0)
 end
 
 local function shootPlayer(targetPlayer)
@@ -1023,7 +922,6 @@ local function shootPlayer(targetPlayer)
 	local myRoot = getRoot(localPlayer.Character)
 	if not targetRoot or not myRoot then return end
 
-	local originalPos = myRoot.CFrame
 	local shootPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * 10)
 	shootPosition = Vector3.new(shootPosition.X, targetRoot.Position.Y, shootPosition.Z)
 	myRoot.CFrame = CFrame.new(shootPosition, targetRoot.Position)
@@ -1062,10 +960,6 @@ local function shootPlayer(targetPlayer)
 	if gun then gun.Parent = localPlayer.Backpack end
 end
 
-
-local autoFarmActive = false
-local autoFarmConnection = nil
-
 local function autoFarm()
 	stopActiveCommand()
 	autoFarmActive = true
@@ -1081,9 +975,7 @@ local function autoFarm()
 			end
 		end
 
-		if not anyAdmin then
-			return
-		end
+		if not anyAdmin then return end
 
 		local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
 		if not gun then
@@ -1096,66 +988,59 @@ local function autoFarm()
 				end
 			end
 		else
-			local murderer = nil
 			for _, player in ipairs(Players:GetPlayers()) do
 				if player ~= localPlayer and player.Character and not isWhitelisted(player) then
 					local knife = player.Character:FindFirstChild("Knife") or 
 						(player.Backpack and player.Backpack:FindFirstChild("Knife"))
 					if knife then
-						murderer = player
+						shootPlayer(player)
 						break
 					end
 				end
-			end
-
-			if murderer then
-				shootPlayer(murderer)
 			end
 		end
 
 		local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
 		if knife then
-			local targets = {}
 			for _, player in ipairs(Players:GetPlayers()) do
 				if player ~= localPlayer and player.Character and not isWhitelisted(player) then
 					local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
 					if humanoid and humanoid.Health > 0 then
-						table.insert(targets, player)
+						local targetRoot = getRoot(player.Character)
+						local myRoot = getRoot(localPlayer.Character)
+						if targetRoot and myRoot then
+							myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -2)
+							knife.Parent = localPlayer.Character
+							for i = 1, 20 do
+								simulateClick()
+								task.wait(0.01)
+							end
+							knife.Parent = localPlayer.Backpack
+							break
+						end
 					end
-				end
-			end
-
-			if #targets > 0 then
-				local target = targets[math.random(1, #targets)]
-				local targetRoot = getRoot(target.Character)
-				local myRoot = getRoot(localPlayer.Character)
-				if targetRoot and myRoot then
-					myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -2)
-					knife.Parent = localPlayer.Character
-					for i = 1, 20 do
-						simulateClick()
-						task.wait(0.01)
-					end
-					knife.Parent = localPlayer.Backpack
 				end
 			end
 		end
 	end)
 end
 
+local function stopAutoFarm()
+	autoFarmActive = false
+	if autoFarmConnection then
+		autoFarmConnection:Disconnect()
+		autoFarmConnection = nil
+	end
+end
 
 local function tradePlayer(targetPlayer)
 	if not targetPlayer then return end
-	makeStandSpeak("Sending trade request to "..targetPlayer.Name)
 	local args = {
 		targetPlayer
 	}
 	local success, err = pcall(function()
 		ReplicatedStorage:WaitForChild("Trade"):WaitForChild("SendRequest"):InvokeServer(unpack(args))
 	end)
-	if not success then
-		makeStandSpeak("Failed to send trade request!")
-	end
 end
 
 local function whitelistPlayer(playerName)
@@ -1317,7 +1202,7 @@ local function describePlayer(targetName)
 end
 
 local function checkCommandAbuse(speaker)
-	if not isOwner(speaker) then return false end
+	if isOwner(speaker) then return false end
 	local mainOwner = getMainOwner()
 	if mainOwner and speaker.Name == mainOwner.Name then return false end
 	if isPlayerSuspended(speaker.Name) then
@@ -1628,7 +1513,6 @@ local function processCommandOriginal(speaker, message)
 		elseif args[2]:lower() == "off" then
 			stopProtection()
 		end
-
 	elseif cmd == ".say" and args[2] then
 		makeStandSpeak(table.concat(args, " ", 2))
 	elseif cmd == ".reset" then
@@ -1645,7 +1529,6 @@ local function processCommandOriginal(speaker, message)
 		elseif args[2]:lower() == "off" then
 			stopAutoFarm()
 		end
-
 	elseif cmd == ".fling" and args[2] then
 		local targetName = args[2]:lower()
 		if targetName == "all" then
@@ -1671,7 +1554,6 @@ local function processCommandOriginal(speaker, message)
 			else
 				makeStandSpeak("No sheriff found")
 			end
-
 		elseif targetName == "random" then
 			local target = getRandomPlayer()
 			if target then
@@ -1847,21 +1729,6 @@ local function processCommandOriginal(speaker, message)
 				makeStandSpeak("Target not found")
 			end
 		end
-
-	elseif cmd == "!pricing" then
-		showPricing(speaker)
-	elseif cmd == "!freetrial" then
-		if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
-			makeStandSpeak("You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
-			return
-		end
-		if not isFreeTrial(speaker) then
-			table.insert(getgenv().FreeTrial, speaker.Name)
-			makeStandSpeak("Thanks for redeeming free trial! You have 5 minutes to use commands. Type .commands to see available commands")
-			spawn(function() processFreeTrial(speaker) end)
-		else
-			makeStandSpeak("You already have an active free trial")
-		end
 	elseif cmd == ".trade" and args[2] then
 		local target = findTarget(table.concat(args, " ", 2))
 		if target then
@@ -1877,10 +1744,10 @@ local function processCommand(speaker, message)
 	local commandPrefix = message:match("^[.!]")
 	if not commandPrefix then return end
 	local cmd = message:match("^([^%s]+)"):lower()
-	if cmd == "!pricing" then
+	if cmd == "!pricing" or cmd == ".pricing" then
 		showPricing(speaker)
 		return
-	elseif cmd == "!freetrial" then
+	elseif cmd == "!freetrial" or cmd == ".freetrial" then
 		if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
 			makeStandSpeak("You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
 			return
@@ -1896,7 +1763,7 @@ local function processCommand(speaker, message)
 	end
 	if speaker ~= localPlayer then
 		if not hasAdminPermissions(speaker) then
-			makeStandSpeak("Hey "..speaker.Name..", you can't use commands. Type !pricing to see pricing or !freetrial to try it out")
+			showPricing(speaker)
 			return
 		end
 		if isPlayerSuspended(speaker.Name) then
@@ -1917,23 +1784,7 @@ local function processCommand(speaker, message)
 		table.insert(args, word)
 	end
 	cmd = args[1]:lower()
-	if cmd == ".pricing" then
-		showPricing(speaker)
-		return
-	elseif cmd == ".freetrial" then
-		if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
-			makeStandSpeak("You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
-			return
-		end
-		if not isFreeTrial(speaker) then
-			table.insert(getgenv().FreeTrial, speaker.Name)
-			makeStandSpeak("Thanks for redeeming free trial! You have 5 minutes to use commands. Type .commands to see available commands")
-			spawn(function() processFreeTrial(speaker) end)
-		else
-			makeStandSpeak("You already have an active free trial")
-		end
-		return
-	elseif cmd == ".commands" then
+	if cmd == ".commands" then
 		showCommandsForRank(speaker)
 		return
 	end
@@ -1960,7 +1811,7 @@ local function setupChatListeners()
 			respondToChat(player, message)
 			processCommand(player, message)
 		end)
-	end)
+	end
 	Players.PlayerRemoving:Connect(function(player)
 		if hasAdminPermissions(player) then
 			checkAdminLeft()
@@ -1988,7 +1839,3 @@ if localPlayer then
 else
 	warn("LocalPlayer not found!")
 end
-
-
-
-
