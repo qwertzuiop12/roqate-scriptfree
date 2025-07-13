@@ -872,7 +872,8 @@ local function eliminateAllPlayers(speaker)
 	local myRoot = getRoot(localPlayer.Character)
 	if not myRoot then return end
 
-	myRoot.CFrame = speakerRoot.CFrame * CFrame.new(0, 0, -2)
+	local safeSpot = speakerRoot.CFrame * CFrame.new(0, 10, 0)
+	myRoot.CFrame = safeSpot
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
@@ -938,10 +939,10 @@ local function stealGun(speaker)
 				local myRoot = getRoot(localPlayer.Character)
 				if myRoot then
 					myRoot.CFrame = speakerRoot.CFrame * CFrame.new(0, 0, -2)
-					resetStand()
 				end
 			end
 		end
+		resetStand()
 		return
 	end
 
@@ -996,7 +997,8 @@ local function shootPlayer(targetPlayer)
 	if not targetRoot or not myRoot then return end
 	
 	local originalPos = myRoot.CFrame
-	myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -2)
+	local safeSpot = targetRoot.CFrame * CFrame.new(0, 10, 0)
+	myRoot.CFrame = safeSpot
 	
 	if workspace.CurrentCamera then
 		workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
@@ -1030,18 +1032,22 @@ local function breakGun(targetPlayer)
 	
 	makeStandSpeak("Breaking gun on "..targetPlayer.Name.."!")
 	
-	local args = {
-		1,
-		Vector3.new(math.huge, math.huge, math.huge),
-		"AH2"
-	}
-	
 	local gun = targetPlayer.Backpack:FindFirstChild("Gun") or targetPlayer.Character:FindFirstChild("Gun")
 	if gun then
-		local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-		if remote then
-			remote:InvokeServer(unpack(args))
+		for i = 1, 20 do
+			local args = {
+				1,
+				Vector3.new(math.random(-10000, 10000), math.random(-10000, 10000), math.random(-10000, 10000)),
+				"AH2"
+			}
+			local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+			if remote then
+				remote:InvokeServer(unpack(args))
+			end
+			task.wait(0.1)
 		end
+	else
+		makeStandSpeak("No gun found on "..targetPlayer.Name)
 	end
 end
 
@@ -1068,11 +1074,12 @@ local function fireShot(targetPlayer)
 	local targetRoot = getRoot(targetPlayer.Character)
 	if not shooterRoot or not targetRoot then return end
 	
-	if (shooterRoot.Position - targetRoot.Position).Magnitude > 10 then
+	local distance = (shooterRoot.Position - targetRoot.Position).Magnitude
+	if distance > 30 then
 		makeStandSpeak(shooter.Name.." is too far from "..targetPlayer.Name.."!")
 		return
 	end
-	
+
 	makeStandSpeak("Forcing "..shooter.Name.." to shoot "..targetPlayer.Name.."!")
 	
 	local gun = shooter.Backpack:FindFirstChild("Gun") or shooter.Character:FindFirstChild("Gun")
