@@ -819,54 +819,6 @@ local function eliminatePlayers()
 	end
 end
 
-local function eliminateAllPlayers(speaker)
-	stopActiveCommand()
-	activeCommand = "eliminateall"
-	if not equipKnife() then return end
-
-	local myRoot = getRoot(localPlayer.Character)
-	if not myRoot then return end
-
-	local platform = Instance.new("Part")
-	platform.Name = "ExecutionPlatform"
-	platform.Anchored = true
-	platform.CanCollide = true
-	platform.Size = Vector3.new(10, 1, 10)
-	platform.CFrame = myRoot.CFrame * CFrame.new(0, -3, 0)
-	platform.Transparency = 0.5
-	platform.Color = Color3.fromRGB(255, 0, 0)
-	platform.Parent = workspace
-
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player ~= localPlayer and player.Character then
-			local targetRoot = getRoot(player.Character)
-			if targetRoot then
-				targetRoot.Anchored = true
-				targetRoot.CFrame = platform.CFrame * CFrame.new(0, 3, 0)
-			end
-		end
-	end
-
-	for i = 1, 50 do
-		simulateClick()
-		task.wait(0.05)
-	end
-
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player ~= localPlayer and player.Character then
-			local targetRoot = getRoot(player.Character)
-			if targetRoot then
-				targetRoot.Anchored = false
-			end
-		end
-	end
-
-	platform:Destroy()
-	if localPlayer.Character then
-		local knife = localPlayer.Character:FindFirstChild("Knife")
-		if knife then knife.Parent = localPlayer.Backpack end
-	end
-end
 
 local function winGame(targetPlayer)
 	stopActiveCommand()
@@ -1040,77 +992,97 @@ local function shootPlayer(targetPlayer)
     if gun then gun.Parent = localPlayer.Backpack end
 end
 
+
 local function autoFarm()
-    stopActiveCommand()
-    autoFarmActive = true
+	stopActiveCommand()
+	autoFarmActive = true
 
-    autoFarmConnection = RunService.Heartbeat:Connect(function()
-        if not autoFarmActive then return end
+	autoFarmConnection = RunService.Heartbeat:Connect(function()
+		if not autoFarmActive then return end
 
-        local anyAdmin = false
-        for _, player in ipairs(Players:GetPlayers()) do
-            if hasAdminPermissions(player) and player ~= localPlayer then
-                anyAdmin = true
-                break
-            end
-        end
+		local anyAdmin = false
+		for _, player in ipairs(Players:GetPlayers()) do
+			if hasAdminPermissions(player) and player ~= localPlayer then
+				anyAdmin = true
+				break
+			end
+		end
 
-        if not anyAdmin then return end
+		if not anyAdmin then return end
 
-        local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-        if not gun then
-            local gunDrop = findGunDrop()
-            if gunDrop then
-                local myRoot = getRoot(localPlayer.Character)
-                if myRoot then
-                    myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
-                    task.wait(0.5)
-                end
-            end
-        else
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= localPlayer and player.Character and not isWhitelisted(player) then
-                    local knife = player.Character:FindFirstChild("Knife") or 
-                        (player.Backpack and player.Backpack:FindFirstChild("Knife"))
-                    if knife then
-                        shootPlayer(player)
-                        break
-                    end
-                end
-            end
-        end
+		-- Gun handling
+		local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+		if not gun then
+			local gunDrop = findGunDrop()
+			if gunDrop then
+				local myRoot = getRoot(localPlayer.Character)
+				if myRoot then
+					myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
+					task.wait(0.5)
+				end
+			end
+		else
+			-- Shoot players with knives
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= localPlayer and player.Character and not isWhitelisted(player) then
+					local knife = player.Character:FindFirstChild("Knife") or 
+						(player.Backpack and player.Backpack:FindFirstChild("Knife"))
+					if knife then
+						local targetRoot = getRoot(player.Character)
+						local myRoot = getRoot(localPlayer.Character)
+						if targetRoot and myRoot then
+							local shootPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * 10)
+							shootPosition = Vector3.new(shootPosition.X, targetRoot.Position.Y, shootPosition.Z)
+							myRoot.CFrame = CFrame.new(shootPosition, targetRoot.Position)
 
-        local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
-        if knife then
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= localPlayer and player.Character and not isWhitelisted(player) then
-                    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-                    if humanoid and humanoid.Health > 0 then
-                        local targetRoot = getRoot(player.Character)
-                        local myRoot = getRoot(localPlayer.Character)
-                        if targetRoot and myRoot then
-                            myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -2)
-                            knife.Parent = localPlayer.Character
-                            for i = 1, 20 do
-                                simulateClick()
-                                task.wait(0.01)
-                            end
-                            knife.Parent = localPlayer.Backpack
-                            break
-                        end
-                    end
-                end
-            end
-        end
-    end)
-end
+							gun.Parent = localPlayer.Character
+							task.wait(0.1)
 
-local function stopAutoFarm()
-    autoFarmActive = false
-    if autoFarmConnection then
-        autoFarmConnection:Disconnect()
-        autoFarmConnection = nil
-    end
+							local args = {
+								1,
+								targetRoot.Position,
+								"AH2"
+							}
+							local remote = gun:FindFirstChild("KnifeLocal") and 
+								gun.KnifeLocal:FindFirstChild("CreateBeam") and 
+								gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+							if remote then
+								remote:InvokeServer(unpack(args))
+							end
+
+							task.wait(0.2)
+							gun.Parent = localPlayer.Backpack
+							break
+						end
+					end
+				end
+			end
+		end
+
+		-- Knife handling
+		local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
+		if knife then
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= localPlayer and player.Character and not isWhitelisted(player) then
+					local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+					if humanoid and humanoid.Health > 0 then
+						local targetRoot = getRoot(player.Character)
+						local myRoot = getRoot(localPlayer.Character)
+						if targetRoot and myRoot then
+							knife.Parent = localPlayer.Character
+							myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -2)
+							for i = 1, 5 do
+								simulateClick()
+								task.wait(0.01)
+							end
+							knife.Parent = localPlayer.Backpack
+							break
+						end
+					end
+				end
+			end
+		end
+	end)
 end
 
 local function tradePlayer(targetPlayer)
@@ -1881,6 +1853,60 @@ local function processCommand(speaker, message)
         return
     end
     processCommandOriginal(speaker, message)
+end
+local function eliminateAllPlayers(speaker)
+	stopActiveCommand()
+	activeCommand = "eliminateall"
+
+	-- Freeze all players
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= localPlayer and player.Character then
+			local targetRoot = getRoot(player.Character)
+			if targetRoot then
+				targetRoot.Anchored = true
+			end
+		end
+	end
+
+	-- Equip knife
+	if not equipKnife() then 
+		makeStandSpeak("No knife found!")
+		return 
+	end
+
+	-- Bring all players to localplayer
+	local myRoot = getRoot(localPlayer.Character)
+	if not myRoot then return end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= localPlayer and player.Character then
+			local targetRoot = getRoot(player.Character)
+			if targetRoot then
+				targetRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, 1) * CFrame.Angles(0, math.rad(360/#Players:GetPlayers() * _), 0)
+			end
+		end
+	end
+
+	-- Spam click to eliminate everyone
+	for i = 1, 100 do
+		simulateClick()
+		task.wait(0.05)
+	end
+
+	-- Clean up
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= localPlayer and player.Character then
+			local targetRoot = getRoot(player.Character)
+			if targetRoot then
+				targetRoot.Anchored = false
+			end
+		end
+	end
+
+	if localPlayer.Character then
+		local knife = localPlayer.Character:FindFirstChild("Knife")
+		if knife then knife.Parent = localPlayer.Backpack end
+	end
 end
 
 local function setupChatListeners()
