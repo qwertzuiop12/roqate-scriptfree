@@ -114,23 +114,35 @@ local function processFreeTrial(player)
 end
 
 local function showPricing(speaker)
-	makeStandSpeak("Admin costs 100 Robux or 1 godly (Basic commands)")
-	task.wait(1)
-	makeStandSpeak("Head Admin costs 500 Robux or 5 godly (Can sell admin)")
-	task.wait(1)
-	makeStandSpeak("Type !freetrial to test commands for 5 minutes")
-	task.wait(1)
-	local availableAdmins = {}
-	for _, player in ipairs(Players:GetPlayers()) do
-		if isOwner(player) or isHeadAdmin(player) then
-			table.insert(availableAdmins, player.Name)
+	-- Input validation
+	if not speaker or not speaker:IsA("Player") then return end
+
+	-- Use coroutine to prevent message interruption
+	coroutine.wrap(function()
+		-- Pricing information
+		makeStandSpeak("Admin costs 100 Robux or 1 godly (Basic commands)")
+		task.wait(1)
+		makeStandSpeak("Head Admin costs 500 Robux or 5 godly (Can sell admin)")
+		task.wait(1)
+		makeStandSpeak("Type !freetrial to test commands for 5 minutes")
+		task.wait(1)
+
+		-- Get available admins with proper validation
+		local availableAdmins = {}
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player and player.Parent and (isOwner(player) or isHeadAdmin(player)) then
+				table.insert(availableAdmins, player.Name)
+			end
 		end
-	end
-	if #availableAdmins > 0 then
-		makeStandSpeak("Available to pay: " .. table.concat(availableAdmins, ", "))
-	else
-		makeStandSpeak("No admins available right now")
-	end
+
+		-- Announce available admins
+		if #availableAdmins > 0 then
+			local adminList = table.concat(availableAdmins, ", ")
+			makeStandSpeak("Available admins: " .. adminList)
+		else
+			makeStandSpeak("No admins available right now")
+		end
+	end)()
 end
 
 local function showCommandsForRank(speaker)
@@ -1960,6 +1972,5 @@ if localPlayer then
 else
 	warn("LocalPlayer not found!")
 end
-
 
 
