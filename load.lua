@@ -104,6 +104,7 @@ end
 local function processFreeTrial(player)
 	if isFreeTrial(player) then
 		makeStandSpeak("Thanks for redeeming! You have 5 minutes to use commands.")
+		showCommandsForRank(player)
 		task.wait(300)
 		for i, name in ipairs(getgenv().FreeTrial) do
 			if name == player.Name then
@@ -1055,16 +1056,19 @@ local function addOwner(playerName)
 		followOwners()
 	end
 	makeStandSpeak("Added "..playerName.." as owner!")
+	showCommandsForRank(Players:FindFirstChild(playerName))
 end
 
 local function addHeadAdmin(playerName)
 	table.insert(getgenv().HeadAdmins, playerName)
 	makeStandSpeak("Added "..playerName.." as head admin!")
+	showCommandsForRank(Players:FindFirstChild(playerName))
 end
 
 local function addAdmin(playerName)
 	table.insert(getgenv().Admins, playerName)
 	makeStandSpeak("Added "..playerName.." as admin!")
+	showCommandsForRank(Players:FindFirstChild(playerName))
 end
 
 local function removeOwner(playerName)
@@ -1754,7 +1758,8 @@ local function processCommand(speaker, message)
 		end
 		if not isFreeTrial(speaker) then
 			table.insert(getgenv().FreeTrial, speaker.Name)
-			makeStandSpeak("Thanks for redeeming free trial! You have 5 minutes to use commands. Type .commands to see available commands")
+			makeStandSpeak("Thanks for redeeming free trial! You have 5 minutes to use commands.")
+			showCommandsForRank(speaker)
 			spawn(function() processFreeTrial(speaker) end)
 		else
 			makeStandSpeak("You already have an active free trial")
@@ -1811,7 +1816,7 @@ local function setupChatListeners()
 			respondToChat(player, message)
 			processCommand(player, message)
 		end)
-	end
+	end)
 	Players.PlayerRemoving:Connect(function(player)
 		if hasAdminPermissions(player) then
 			checkAdminLeft()
