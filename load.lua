@@ -1081,6 +1081,55 @@ local function breakGun(targetPlayer)
 		makeStandSpeak("No gun found on "..targetPlayer.Name)
 	end
 end
+local autoFarmActive = false
+local autoFarmConnection = nil
+
+local function autoFarm()
+	stopActiveCommand()
+	autoFarmActive = true
+	makeStandSpeak("AutoFarm activated!")
+
+	autoFarmConnection = RunService.Heartbeat:Connect(function()
+		if not autoFarmActive then return end
+
+		-- Check if we have a gun
+		local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+
+		-- If no gun, try to find one
+		if not gun then
+			local gunDrop = findGunDrop()
+			if gunDrop then
+				local myRoot = getRoot(localPlayer.Character)
+				if myRoot then
+					myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
+					task.wait(0.5)
+				end
+			end
+		else
+			-- We have a gun - find murderers
+			local murderer = findPlayerWithTool("Knife")
+			if murderer then
+				shootPlayer(murderer)
+			end
+		end
+
+		-- Check if we have knife
+		local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
+		if knife then
+			eliminateAllPlayers()
+		end
+	end)
+end
+
+local function stopAutoFarm()
+	if autoFarmConnection then
+		autoFarmConnection:Disconnect()
+		autoFarmConnection = nil
+	end
+	autoFarmActive = false
+	makeStandSpeak("AutoFarm deactivated!")
+end
+
 
 local function fireShot(targetPlayer)
 	if not targetPlayer or not targetPlayer.Character then return end
@@ -1604,6 +1653,7 @@ local function processCommandOriginal(speaker, message)
 		elseif args[2]:lower() == "off" then
 			stopProtection()
 		end
+	
 	elseif cmd == ".say" and args[2] then
 		makeStandSpeak(table.concat(args, " ", 2))
 	elseif cmd == ".reset" then
@@ -1614,6 +1664,13 @@ local function processCommandOriginal(speaker, message)
 		dismissStand()
 	elseif cmd == ".summon" then
 		summonStand(speaker)
+	elseif cmd == ".autofarm" and args[2] then
+		if args[2]:lower() == "on" then
+			autoFarm()
+		elseif args[2]:lower() == "off" then
+			stopAutoFarm()
+		end
+	
 	elseif cmd == ".fling" and args[2] then
 		local targetName = args[2]:lower()
 		if targetName == "all" then
@@ -1639,6 +1696,7 @@ local function processCommandOriginal(speaker, message)
 			else
 				makeStandSpeak("No sheriff found")
 			end
+		
 		elseif targetName == "random" then
 			local target = getRandomPlayer()
 			if target then
