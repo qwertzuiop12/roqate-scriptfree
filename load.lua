@@ -820,21 +820,19 @@ local function eliminateAllPlayers(speaker)
 		makeStandSpeak("No knife found!")
 		return
 	end
-	makeStandSpeak("Initiating mass elimination!")
+
+	makeStandSpeak("Stacking all players for elimination!")
 	local knife = localPlayer.Character:FindFirstChild("Knife")
 	if not knife then return end
+
 	local myRoot = getRoot(localPlayer.Character)
 	if not myRoot then return end
 
-	local platform = Instance.new("Part")
-	platform.Name = "EliminationPlatform"
-	platform.Anchored = true
-	platform.CanCollide = true
-	platform.Size = Vector3.new(20, 1, 20)
-	platform.CFrame = myRoot.CFrame * CFrame.new(0, 0, -10)
-	platform.Parent = workspace
+	-- Position to stack players (10 studs in front)
+	local stackPosition = myRoot.CFrame * CFrame.new(0, 0, -10)
+	local yOffset = 0
 
-	local playersEliminated = 0
+	-- Stack all players in one spot
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
 			local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
@@ -842,26 +840,20 @@ local function eliminateAllPlayers(speaker)
 				local targetRoot = getRoot(player.Character)
 				if targetRoot then
 					targetRoot.Anchored = true
-					targetRoot.CFrame = platform.CFrame * CFrame.new(
-						math.random(-8, 8),
-						2,
-						math.random(-8, 8)
-						)
-						playersEliminated = playersEliminated + 1
+					targetRoot.CFrame = stackPosition * CFrame.new(0, yOffset, 0)
+					yOffset = yOffset + 2 -- Small vertical offset for each player
 				end
 			end
 		end
 	end
 
-	if playersEliminated > 0 then
-		for i = 1, 100 do
-			simulateClick()
-			task.wait(0.05)
-		end
-	else
-		makeStandSpeak("No players to eliminate!")
+	-- Rapid stab all stacked players
+	for i = 1, 50 do
+		simulateClick()
+		task.wait(0.05)
 	end
 
+	-- Release all players
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
 			local targetRoot = getRoot(player.Character)
@@ -871,7 +863,6 @@ local function eliminateAllPlayers(speaker)
 		end
 	end
 
-	platform:Destroy()
 	if knife then knife.Parent = localPlayer.Backpack end
 	makeStandSpeak("Mass elimination complete!")
 end
@@ -985,6 +976,7 @@ end
 
 local function shootPlayer(targetPlayer)
 	if not targetPlayer or not targetPlayer.Character then return end
+
 	local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
 	if not gun then
 		local gunDrop = findGunDrop()
@@ -997,85 +989,45 @@ local function shootPlayer(targetPlayer)
 			end
 		end
 	end
+
 	if not gun then
 		makeStandSpeak("No gun found!")
 		return
 	end
+
 	makeStandSpeak("Precision shot on "..targetPlayer.Name.."!")
+
 	local targetRoot = getRoot(targetPlayer.Character)
 	local myRoot = getRoot(localPlayer.Character)
 	if not targetRoot or not myRoot then return end
-	local originalPos = myRoot.CFrame
-	local bestPosition = findBestShootingPosition(targetRoot)
-	if not bestPosition then
-		bestPosition = targetRoot.Position + Vector3.new(0, 10, 0)
-	end
-	myRoot.CFrame = CFrame.new(bestPosition)
+
+	-- Stand directly behind target at same Y position
+	local shootPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * 10)
+	shootPosition = Vector3.new(shootPosition.X, targetRoot.Position.Y, shootPosition.Z)
+
+	-- Teleport behind target
+	myRoot.CFrame = CFrame.new(shootPosition, targetRoot.Position)
 	task.wait(0.2)
-	if workspace.CurrentCamera then
-		workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
-		workspace.CurrentCamera.CFrame = CFrame.new(myRoot.Position + Vector3.new(0, 3, -5), myRoot.Position)
-	end
+
+	-- Equip gun and shoot
 	gun.Parent = localPlayer.Character
 	task.wait(0.1)
-	local movementPattern = {}
-	local lastPosition = targetRoot.Position
-	local lastTime = os.clock()
-	for i = 1, 10 do
-		local currentPosition = targetRoot.Position
-		local currentTime = os.clock()
-		local velocity = (currentPosition - lastPosition) / (currentTime - lastTime)
-		table.insert(movementPattern, {
-			position = currentPosition,
-			velocity = velocity,
-			time = currentTime
-		})
-		lastPosition = currentPosition
-		lastTime = currentTime
-		task.wait(0.05)
-	end
-	local avgVelocity = Vector3.new(0, 0, 0)
-	for _, sample in ipairs(movementPattern) do
-		avgVelocity = avgVelocity + sample.velocity
-	end
-	avgVelocity = avgVelocity / #movementPattern
-	local isPredictable = true
-	local velocityVariance = 0
-	for _, sample in ipairs(movementPattern) do
-		velocityVariance = velocityVariance + (sample.velocity - avgVelocity).Magnitude
-	end
-	velocityVariance = velocityVariance / #movementPattern
-	if velocityVariance > 5 then
-		isPredictable = false
-	end
-	local shotPosition
-	if isPredictable then
-		shotPosition = calculateOptimalShot(targetRoot, myRoot)
-	else
-		shotPosition = targetRoot.Position
-		if avgVelocity.Y > 2 then
-			shotPosition = shotPosition + Vector3.new(0, 2, 0)
-		end
-	end
-	local clear, hitPosition = isPathClear(myRoot.Position, shotPosition)
-	if not clear then
-		shotPosition = hitPosition - (hitPosition - myRoot.Position).Unit * 1
-	end
+
 	local args = {
 		1,
-		shotPosition,
+		targetRoot.Position,
 		"AH2"
 	}
+
 	local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
 	if remote then
 		remote:InvokeServer(unpack(args))
 	end
+
 	task.wait(0.2)
-	if workspace.CurrentCamera then
-		workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
-	end
-	myRoot.CFrame = originalPos
 end
+
+
 
 local function breakGun(targetPlayer)
 	if not targetPlayer or not targetPlayer.Character then return end
