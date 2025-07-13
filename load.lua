@@ -812,48 +812,71 @@ local function eliminatePlayers()
 	if knife then knife.Parent = localPlayer.Backpack end
 	makeStandSpeak("Elimination protocol complete!")
 end
-
 local function eliminateAllPlayers(speaker)
 	stopActiveCommand()
 	activeCommand = "eliminateall"
+
 	if not equipKnife() then
 		makeStandSpeak("No knife found!")
 		return
 	end
 
-	makeStandSpeak("Stacking all players for elimination!")
+	makeStandSpeak("Gathering all players for execution!")
 	local knife = localPlayer.Character:FindFirstChild("Knife")
 	if not knife then return end
 
 	local myRoot = getRoot(localPlayer.Character)
 	if not myRoot then return end
 
-	-- Position to stack players (10 studs in front)
-	local stackPosition = myRoot.CFrame * CFrame.new(0, 0, -10)
-	local yOffset = 0
+	-- Create execution platform
+	local platform = Instance.new("Part")
+	platform.Name = "ExecutionPlatform"
+	platform.Anchored = true
+	platform.CanCollide = true
+	platform.Size = Vector3.new(10, 1, 10)
+	platform.CFrame = myRoot.CFrame * CFrame.new(0, -3, 0)
+	platform.Transparency = 0.5
+	platform.Color = Color3.fromRGB(255, 0, 0)
+	platform.Parent = workspace
 
-	-- Stack all players in one spot
+	-- Teleport and freeze all players in front
+	local playerCount = 0
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
 			local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
 			if humanoid and humanoid.Health > 0 then
 				local targetRoot = getRoot(player.Character)
 				if targetRoot then
+					-- Position 1 stud in front of local player
+					local position = myRoot.CFrame * CFrame.new(0, 0, -1)
+
+					-- Freeze player
 					targetRoot.Anchored = true
-					targetRoot.CFrame = stackPosition * CFrame.new(0, yOffset, 0)
-					yOffset = yOffset + 2 -- Small vertical offset for each player
+					targetRoot.CFrame = position
+
+					-- Make them stand on platform
+					targetRoot.CFrame = platform.CFrame * CFrame.new(0, 3, 0)
+
+					playerCount = playerCount + 1
 				end
 			end
 		end
 	end
 
-	-- Rapid stab all stacked players
+	if playerCount == 0 then
+		makeStandSpeak("No players to eliminate!")
+		platform:Destroy()
+		return
+	end
+
+	-- Execute all players
+	makeStandSpeak("Executing all players!")
 	for i = 1, 50 do
 		simulateClick()
 		task.wait(0.05)
 	end
 
-	-- Release all players
+	-- Clean up
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= localPlayer and player.Character then
 			local targetRoot = getRoot(player.Character)
@@ -863,8 +886,9 @@ local function eliminateAllPlayers(speaker)
 		end
 	end
 
+	platform:Destroy()
 	if knife then knife.Parent = localPlayer.Backpack end
-	makeStandSpeak("Mass elimination complete!")
+	makeStandSpeak("Execution complete!")
 end
 
 local function winGame(targetPlayer)
