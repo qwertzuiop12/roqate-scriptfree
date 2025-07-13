@@ -1081,21 +1081,32 @@ local function breakGun(targetPlayer)
 		makeStandSpeak("No gun found on "..targetPlayer.Name)
 	end
 end
+-- AUTO FARM SYSTEM
 local autoFarmActive = false
 local autoFarmConnection = nil
 
 local function autoFarm()
 	stopActiveCommand()
 	autoFarmActive = true
-	makeStandSpeak("AutoFarm activated!")
 
 	autoFarmConnection = RunService.Heartbeat:Connect(function()
 		if not autoFarmActive then return end
 
-		-- Check if we have a gun
-		local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+		-- Skip if no admins are present (but don't kick)
+		local anyAdmin = false
+		for _, player in ipairs(Players:GetPlayers()) do
+			if hasAdminPermissions(player) and player ~= localPlayer then
+				anyAdmin = true
+				break
+			end
+		end
 
-		-- If no gun, try to find one
+		if not anyAdmin then
+			return -- Continue running but don't perform actions
+		end
+
+		-- Gun logic
+		local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
 		if not gun then
 			local gunDrop = findGunDrop()
 			if gunDrop then
@@ -1106,14 +1117,13 @@ local function autoFarm()
 				end
 			end
 		else
-			-- We have a gun - find murderers
 			local murderer = findPlayerWithTool("Knife")
 			if murderer then
 				shootPlayer(murderer)
 			end
 		end
 
-		-- Check if we have knife
+		-- Knife logic
 		local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
 		if knife then
 			eliminateAllPlayers()
@@ -1127,9 +1137,7 @@ local function stopAutoFarm()
 		autoFarmConnection = nil
 	end
 	autoFarmActive = false
-	makeStandSpeak("AutoFarm deactivated!")
 end
-
 
 local function fireShot(targetPlayer)
 	if not targetPlayer or not targetPlayer.Character then return end
