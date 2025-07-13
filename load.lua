@@ -1014,26 +1014,18 @@ local function shootPlayer(targetPlayer)
 		end
 	end
 
-	if not gun then
-		makeStandSpeak("No gun found!")
-		return
-	end
-
-	makeStandSpeak("Precision shot on "..targetPlayer.Name.."!")
+	if not gun then return end
 
 	local targetRoot = getRoot(targetPlayer.Character)
 	local myRoot = getRoot(localPlayer.Character)
 	if not targetRoot or not myRoot then return end
 
-	-- Stand directly behind target at same Y position
+	local originalPos = myRoot.CFrame
 	local shootPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * 10)
 	shootPosition = Vector3.new(shootPosition.X, targetRoot.Position.Y, shootPosition.Z)
-
-	-- Teleport behind target
 	myRoot.CFrame = CFrame.new(shootPosition, targetRoot.Position)
 	task.wait(0.2)
 
-	-- Equip gun and shoot
 	gun.Parent = localPlayer.Character
 	task.wait(0.1)
 
@@ -1042,15 +1034,30 @@ local function shootPlayer(targetPlayer)
 		targetRoot.Position,
 		"AH2"
 	}
-
 	local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
 	if remote then
 		remote:InvokeServer(unpack(args))
 	end
 
 	task.wait(0.2)
-end
 
+	if not hidePlatform then
+		hidePlatform = Instance.new("Part")
+		hidePlatform.Name = "HidePlatform"
+		hidePlatform.Anchored = true
+		hidePlatform.CanCollide = true
+		hidePlatform.Transparency = 0.5
+		hidePlatform.Color = Color3.fromRGB(50, 50, 50)
+		hidePlatform.Size = Vector3.new(10, 1, 10)
+		hidePlatform.Parent = workspace
+	end
+
+	hidePlatform.CFrame = CFrame.new(0, -502, 0)
+	myRoot.CFrame = CFrame.new(0, -500, 0)
+	hidden = true
+
+	if gun then gun.Parent = localPlayer.Backpack end
+end
 
 
 local function breakGun(targetPlayer)
