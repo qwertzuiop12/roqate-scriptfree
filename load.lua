@@ -822,7 +822,7 @@ local function eliminatePlayers()
 		task.wait(0.1)
 	end
 	if knife then knife.Parent = localPlayer.Backpack end
-	makeStandSpeak("Elimination protocol complete!")
+	makeStandSpeak("Good Game!")
 end
 local function eliminateAllPlayers(speaker)
 	stopActiveCommand()
@@ -833,7 +833,6 @@ local function eliminateAllPlayers(speaker)
 		return
 	end
 
-	makeStandSpeak("Gathering all players for execution!")
 	local knife = localPlayer.Character:FindFirstChild("Knife")
 	if not knife then return end
 
@@ -1972,5 +1971,6 @@ if localPlayer then
 else
 	warn("LocalPlayer not found!")
 end
+
 
 
