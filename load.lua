@@ -1096,7 +1096,18 @@ local function autoFarm()
 				end
 			end
 		else
-			local murderer = findPlayerWithTool("Knife")
+			local murderer = nil
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= localPlayer and player.Character and not isWhitelisted(player) then
+					local knife = player.Character:FindFirstChild("Knife") or 
+						(player.Backpack and player.Backpack:FindFirstChild("Knife"))
+					if knife then
+						murderer = player
+						break
+					end
+				end
+			end
+
 			if murderer then
 				shootPlayer(murderer)
 			end
@@ -1104,26 +1115,33 @@ local function autoFarm()
 
 		local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
 		if knife then
-			local success = eliminateAllPlayers()
-			if success then
-				task.wait(1) 
-				stopAutoFarm()
-				task.wait(2) 
-				autoFarm() 
-				return
+			local targets = {}
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player ~= localPlayer and player.Character and not isWhitelisted(player) then
+					local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+					if humanoid and humanoid.Health > 0 then
+						table.insert(targets, player)
+					end
+				end
+			end
+
+			if #targets > 0 then
+				local target = targets[math.random(1, #targets)]
+				local targetRoot = getRoot(target.Character)
+				local myRoot = getRoot(localPlayer.Character)
+				if targetRoot and myRoot then
+					myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -2)
+					knife.Parent = localPlayer.Character
+					for i = 1, 20 do
+						simulateClick()
+						task.wait(0.01)
+					end
+					knife.Parent = localPlayer.Backpack
+				end
 			end
 		end
 	end)
 end
-
-local function stopAutoFarm()
-	if autoFarmConnection then
-		autoFarmConnection:Disconnect()
-		autoFarmConnection = nil
-	end
-	autoFarmActive = false
-end
-
 
 
 local function tradePlayer(targetPlayer)
@@ -1970,5 +1988,6 @@ if localPlayer then
 else
 	warn("LocalPlayer not found!")
 end
+
 
 
