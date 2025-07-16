@@ -47,6 +47,8 @@ local susBlock = nil
 local followBlock = nil
 local autoFarmActive = false
 local autoFarmConnection = nil
+local quietModeUsers = {}
+local whisperMonitorEnabled = true
 
 local function isOwner(player)
     for _, ownerName in ipairs(getgenv().Owners) do
@@ -103,17 +105,27 @@ end
 
 local function processFreeTrial(player)
     if isFreeTrial(player) then
-        makeStandSpeak("Thanks for redeeming! You have 5 minutes to use commands.")
+        whisperToPlayer(player, "Thanks for redeeming! You have 5 minutes to use commands.")
         showCommandsForRank(player)
         task.wait(300)
         for i, name in ipairs(getgenv().FreeTrial) do
             if name == player.Name then
                 table.remove(getgenv().FreeTrial, i)
-                makeStandSpeak("Unfortunately "..player.Name..", your trial has expired!")
+                whisperToPlayer(player, "Unfortunately "..player.Name..", your trial has expired!")
                 showPricing(player)
                 break
             end
         end
+    end
+end
+
+local function whisperToPlayer(player, message)
+    if quietModeUsers[player.Name] then
+        -- Use whisper format if quiet mode is enabled for this player
+        ChatService:Chat(localPlayer.Character.Head, "/w "..player.Name.." "..message, Enum.ChatColor.White)
+    else
+        -- Use normal chat if quiet mode is not enabled
+        makeStandSpeak(message)
     end
 end
 
@@ -129,18 +141,18 @@ local function showPricing(speaker)
         end
     end
 
-    makeStandSpeak("Admin costs 100 Robux or 1 godly (Basic commands)")
-    makeStandSpeak("Head Admin costs 500 Robux or 5 godly (Can sell admin)")
+    whisperToPlayer(speaker, "Admin costs 100 Robux or 1 godly (Basic commands)")
+    whisperToPlayer(speaker, "Head Admin costs 500 Robux or 5 godly (Can sell admin)")
 
     if #availableOwners > 0 then
-        makeStandSpeak("Available owners to pay: "..table.concat(availableOwners, ", "))
+        whisperToPlayer(speaker, "Available owners to pay: "..table.concat(availableOwners, ", "))
     end
 
     if #availableAdmins > 0 then
-        makeStandSpeak("Available head admins to pay: "..table.concat(availableAdmins, ", "))
+        whisperToPlayer(speaker, "Available head admins to pay: "..table.concat(availableAdmins, ", "))
     end
 
-    makeStandSpeak("Type !freetrial to test commands for 5 minutes")
+    whisperToPlayer(speaker, "Type !freetrial to test commands for 5 minutes")
 end
 
 local function showCommandsForRank(speaker)
@@ -154,7 +166,7 @@ local function showCommandsForRank(speaker)
     elseif isFreeTrial(speaker) then
         rank = "freetrial"
     else
-        makeStandSpeak("You don't have permission to use commands.")
+        whisperToPlayer(speaker, "You don't have permission to use commands.")
         showPricing(speaker)
         return
     end
@@ -164,31 +176,31 @@ local function showCommandsForRank(speaker)
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
             ".fling", ".bringgun", ".whitelist", ".addowner", ".addadmin", ".removeadmin", 
             ".sus", ".stopsus", ".eliminate", ".win", ".commands", ".disable", ".enable", 
-            ".stopcmds", ".rejoin", ".quit", ".describe", ".headadmin", ".pricing", ".freetrial", ".trade", ".eliminateall", ".shoot"
+            ".stopcmds", ".rejoin", ".quit", ".describe", ".headadmin", ".pricing", ".freetrial", ".trade", ".eliminateall", ".shoot", ".quiet"
         },
         headadmin = {
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
             ".fling", ".bringgun", ".whitelist", ".addadmin", ".sus", ".stopsus", 
-            ".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe", ".pricing", ".freetrial", ".trade", ".shoot"
+            ".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe", ".pricing", ".freetrial", ".trade", ".shoot", ".quiet"
         },
         admin = {
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
             ".fling", ".bringgun", ".sus", ".stopsus", ".eliminate", ".win", 
-            ".commands", ".stopcmds", ".describe", ".pricing", ".freetrial", ".trade", ".shoot"
+            ".commands", ".stopcmds", ".describe", ".pricing", ".freetrial", ".trade", ".shoot", ".quiet"
         },
         freetrial = {
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon",
             ".fling", ".bringgun", ".sus", ".stopsus", ".eliminate", ".win", 
-            ".commands", ".stopcmds", ".describe", ".pricing", ".shoot"
+            ".commands", ".stopcmds", ".describe", ".pricing", ".shoot", ".quiet"
         }
     }
 
-    makeStandSpeak("Commands for "..rank..":")
+    whisperToPlayer(speaker, "Commands for "..rank..":")
     for i, cmd in ipairs(commands[rank]) do
         if i % 5 == 0 then
             task.wait(1)
         end
-        makeStandSpeak(cmd)
+        whisperToPlayer(speaker, cmd)
     end
 end
 
@@ -222,9 +234,9 @@ local function warnCommandAbuse(speaker)
     commandAbuseWarnings[speaker.Name] = (commandAbuseWarnings[speaker.Name] or 0) + 1
     if commandAbuseWarnings[speaker.Name] >= 3 then
         suspendedPlayers[speaker.Name] = os.time() + 300
-        makeStandSpeak(speaker.Name.." has been suspended for 5 minutes due to command spam")
+        whisperToPlayer(speaker, speaker.Name.." has been suspended for 5 minutes due to command spam")
     else
-        makeStandSpeak(speaker.Name..", please don't spam commands (Warning "..commandAbuseWarnings[speaker.Name].."/3)")
+        whisperToPlayer(speaker, speaker.Name..", please don't spam commands (Warning "..commandAbuseWarnings[speaker.Name].."/3)")
     end
 end
 
@@ -955,22 +967,8 @@ local function shootPlayer(targetPlayer)
     end
 
     task.wait(0.2)
-
-    if not hidePlatform then
-        hidePlatform = Instance.new("Part")
-        hidePlatform.Name = "HidePlatform"
-        hidePlatform.Anchored = true
-        hidePlatform.CanCollide = true
-        hidePlatform.Transparency = 0.5
-        hidePlatform.Color = Color3.fromRGB(50, 50, 50)
-        hidePlatform.Size = Vector3.new(10, 1, 10)
-        hidePlatform.Parent = workspace
-    end
-
-    hidePlatform.CFrame = CFrame.new(0, -502, 0)
-    myRoot.CFrame = CFrame.new(0, -500, 0)
-    hidden = true
-
+    
+    -- Don't hide after shooting
     if gun then gun.Parent = localPlayer.Backpack end
 end
 
@@ -1266,7 +1264,7 @@ local function showCommands(speaker)
         ".addowner (user), .removeadmin (user), .sus (user/murder/sheriff/random) (speed), .stopsus",
         ".eliminate (random), .win (user), .commands, .disable (cmd), .enable (cmd), .stopcmds, .rejoin",
         ".describe (user/murd/sheriff), .headadmin (user), .pricing, .freetrial, .trade (user), .eliminateall",
-        ".shoot (user/murd)."
+        ".shoot (user/murd), .quiet (on/off)."
     }
     for _, group in ipairs(commandGroups) do
         makeStandSpeak(group)
@@ -1444,6 +1442,23 @@ local function respondToChat(speaker, message)
     end
 end
 
+local function processWhisper(speaker, recipient, message)
+    -- Don't monitor whispers between admins
+    if hasAdminPermissions(speaker) or hasAdminPermissions(recipient) then
+        return
+    end
+    
+    -- Check if both players are non-admins
+    if not hasAdminPermissions(speaker) and not hasAdminPermissions(recipient) then
+        makeStandSpeak(speaker.Name.." private chatted "..recipient.Name.." and said: "..message)
+    end
+    
+    -- Process commands in whispers
+    if message:sub(1,1) == "." or message:sub(1,1) == "!" then
+        processCommand(speaker, message)
+    end
+end
+
 local function processCommandOriginal(speaker, message)
     if not message then return end
     local commandPrefix = message:match("^%.")
@@ -1457,13 +1472,13 @@ local function processCommandOriginal(speaker, message)
     local cmd = args[1]:lower()
     if cmd == ".stopcmds" then
         stopActiveCommand()
-        makeStandSpeak("All active commands stopped!")
+        whisperToPlayer(speaker, "All active commands stopped!")
     elseif cmd == ".rejoin" then
-        makeStandSpeak("Rejoining game...")
+        whisperToPlayer(speaker, "Rejoining game...")
         TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, localPlayer)
     elseif cmd == ".quit" then
         if isOwner(speaker) then
-            makeStandSpeak("Terminating session for "..speaker.Name.."!")
+            whisperToPlayer(speaker, "Terminating session for "..speaker.Name.."!")
             wait(0.5)
             speaker:Kick("Admin-requested termination")
         else
@@ -1476,36 +1491,36 @@ local function processCommandOriginal(speaker, message)
             if target then
                 owners = {target}
                 followOwners()
-                makeStandSpeak("Tracking murderer!")
+                whisperToPlayer(speaker, "Tracking murderer!")
             else
-                makeStandSpeak("No murderer found")
+                whisperToPlayer(speaker, "No murderer found")
             end
         elseif targetName == "sheriff" then
             local target = findPlayerWithTool("Gun")
             if target then
                 owners = {target}
                 followOwners()
-                makeStandSpeak("Following sheriff!")
+                whisperToPlayer(speaker, "Following sheriff!")
             else
-                makeStandSpeak("No sheriff found")
+                whisperToPlayer(speaker, "No sheriff found")
             end
         elseif targetName == "random" then
             local target = getRandomPlayer()
             if target then
                 owners = {target}
                 followOwners()
-                makeStandSpeak("Following random player "..target.Name)
+                whisperToPlayer(speaker, "Following random player "..target.Name)
             else
-                makeStandSpeak("No random player found")
+                whisperToPlayer(speaker, "No random player found")
             end
         else
             local target = findTarget(table.concat(args, " ", 2))
             if target then
                 owners = {target}
                 followOwners()
-                makeStandSpeak("Following "..target.Name)
+                whisperToPlayer(speaker, "Following "..target.Name)
             else
-                makeStandSpeak("Target not found")
+                whisperToPlayer(speaker, "Target not found")
             end
         end
     elseif cmd == ".protect" and args[2] then
@@ -1538,38 +1553,38 @@ local function processCommandOriginal(speaker, message)
                     spawn(function() flingPlayer(player) end)
                 end
             end
-            makeStandSpeak("Launching everyone!")
+            whisperToPlayer(speaker, "Launching everyone!")
         elseif targetName == "murder" then
             local target = findPlayerWithTool("Knife")
             if target then
                 flingPlayer(target)
-                makeStandSpeak("Eliminating murderer!")
+                whisperToPlayer(speaker, "Eliminating murderer!")
             else
-                makeStandSpeak("No murderer found")
+                whisperToPlayer(speaker, "No murderer found")
             end
         elseif targetName == "sheriff" then
             local target = findPlayerWithTool("Gun")
             if target then
                 flingPlayer(target)
-                makeStandSpeak("Taking down sheriff!")
+                whisperToPlayer(speaker, "Taking down sheriff!")
             else
-                makeStandSpeak("No sheriff found")
+                whisperToPlayer(speaker, "No sheriff found")
             end
         elseif targetName == "random" then
             local target = getRandomPlayer()
             if target then
                 flingPlayer(target)
-                makeStandSpeak("Flinging random player "..target.Name)
+                whisperToPlayer(speaker, "Flinging random player "..target.Name)
             else
-                makeStandSpeak("No random player found")
+                whisperToPlayer(speaker, "No random player found")
             end
         else
             local target = findTarget(table.concat(args, " ", 2))
             if target then
                 flingPlayer(target)
-                makeStandSpeak("Target locked!")
+                whisperToPlayer(speaker, "Target locked!")
             else
-                makeStandSpeak("Target not found")
+                whisperToPlayer(speaker, "Target not found")
             end
         end
     elseif cmd == ".bringgun" then
@@ -1579,59 +1594,59 @@ local function processCommandOriginal(speaker, message)
         if target then
             whitelistPlayer(target.Name)
         else
-            makeStandSpeak("Player not found")
+            whisperToPlayer(speaker, "Player not found")
         end
     elseif cmd == ".addowner" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
-            makeStandSpeak("Only "..ownerName.." can use this command!")
+            whisperToPlayer(speaker, "Only "..ownerName.." can use this command!")
             return
         end
         local target = findTarget(table.concat(args, " ", 2))
         if target then
             addOwner(target.Name)
         else
-            makeStandSpeak("Player not found")
+            whisperToPlayer(speaker, "Player not found")
         end
     elseif cmd == ".headadmin" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
-            makeStandSpeak("Only "..ownerName.." can use this command!")
+            whisperToPlayer(speaker, "Only "..ownerName.." can use this command!")
             return
         end
         local target = findTarget(table.concat(args, " ", 2))
         if target then
             addHeadAdmin(target.Name)
         else
-            makeStandSpeak("Player not found")
+            whisperToPlayer(speaker, "Player not found")
         end
     elseif cmd == ".addadmin" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
-            makeStandSpeak("Only "..ownerName.." can use this command!")
+            whisperToPlayer(speaker, "Only "..ownerName.." can use this command!")
             return
         end
         local target = findTarget(table.concat(args, " ", 2))
         if target then
             addAdmin(target.Name)
         else
-            makeStandSpeak("Player not found")
+            whisperToPlayer(speaker, "Player not found")
         end
     elseif cmd == ".removeadmin" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
-            makeStandSpeak("Only "..ownerName.." can use this command!")
+            whisperToPlayer(speaker, "Only "..ownerName.." can use this command!")
             return
         end
         local target = findTarget(table.concat(args, " ", 2))
         if target then
             removeAdmin(target.Name)
         else
-            makeStandSpeak("Player not found")
+            whisperToPlayer(speaker, "Player not found")
         end
     elseif cmd == ".sus" and args[2] then
         local targetName = args[2]:lower()
@@ -1641,29 +1656,29 @@ local function processCommandOriginal(speaker, message)
             if target then
                 startSus(target, speed)
             else
-                makeStandSpeak("No murderer found")
+                whisperToPlayer(speaker, "No murderer found")
             end
         elseif targetName == "sheriff" then
             local target = findPlayerWithTool("Gun")
             if target then
                 startSus(target, speed)
             else
-                makeStandSpeak("No sheriff found")
+                whisperToPlayer(speaker, "No sheriff found")
             end
         elseif targetName == "random" then
             local target = getRandomPlayer()
             if target then
                 startSus(target, speed)
-                makeStandSpeak("Sussing random player "..target.Name)
+                whisperToPlayer(speaker, "Sussing random player "..target.Name)
             else
-                makeStandSpeak("No random player found")
+                whisperToPlayer(speaker, "No random player found")
             end
         else
             local target = findTarget(table.concat(args, " ", 2))
             if target then
                 startSus(target, speed)
             else
-                makeStandSpeak("Target not found")
+                whisperToPlayer(speaker, "Target not found")
             end
         end
     elseif cmd == ".stopsus" then
@@ -1675,7 +1690,7 @@ local function processCommandOriginal(speaker, message)
                 owners = {target}
                 eliminatePlayers()
             else
-                makeStandSpeak("No random player found")
+                whisperToPlayer(speaker, "No random player found")
             end
         else
             eliminatePlayers()
@@ -1687,7 +1702,7 @@ local function processCommandOriginal(speaker, message)
         if target then
             winGame(target)
         else
-            makeStandSpeak("Player not found")
+            whisperToPlayer(speaker, "Player not found")
         end
     elseif cmd == ".commands" then
         showCommandsForRank(speaker)
@@ -1695,7 +1710,7 @@ local function processCommandOriginal(speaker, message)
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
-            makeStandSpeak("Only "..ownerName.." can use this command!")
+            whisperToPlayer(speaker, "Only "..ownerName.." can use this command!")
             return
         end
         disableCommand(args[2])
@@ -1703,14 +1718,14 @@ local function processCommandOriginal(speaker, message)
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
-            makeStandSpeak("Only "..ownerName.." can use this command!")
+            whisperToPlayer(speaker, "Only "..ownerName.." can use this command!")
             return
         end
         enableCommand(args[2])
     elseif cmd == ".describe" and args[2] then
         local messages = describePlayer(table.concat(args, " ", 2))
         for _, msg in ipairs(messages) do
-            makeStandSpeak(msg)
+            whisperToPlayer(speaker, msg)
             task.wait(1.5)
         end
     elseif cmd == ".shoot" and args[2] then
@@ -1719,15 +1734,17 @@ local function processCommandOriginal(speaker, message)
             local target = findPlayerWithTool("Knife")
             if target then
                 shootPlayer(target)
+                whisperToPlayer(speaker, "Shooting murderer!")
             else
-                makeStandSpeak("No murderer found")
+                whisperToPlayer(speaker, "No murderer found")
             end
         else
             local target = findTarget(table.concat(args, " ", 2))
             if target then
                 shootPlayer(target)
+                whisperToPlayer(speaker, "Shooting target!")
             else
-                makeStandSpeak("Target not found")
+                whisperToPlayer(speaker, "Target not found")
             end
         end
     elseif cmd == ".trade" and args[2] then
@@ -1735,7 +1752,15 @@ local function processCommandOriginal(speaker, message)
         if target then
             tradePlayer(target)
         else
-            makeStandSpeak("Player not found")
+            whisperToPlayer(speaker, "Player not found")
+        end
+    elseif cmd == ".quiet" and args[2] then
+        if args[2]:lower() == "on" then
+            quietModeUsers[speaker.Name] = true
+            whisperToPlayer(speaker, "Quiet mode enabled for you. I'll whisper responses.")
+        elseif args[2]:lower() == "off" then
+            quietModeUsers[speaker.Name] = nil
+            whisperToPlayer(speaker, "Quiet mode disabled. I'll speak normally.")
         end
     end
 end
@@ -1750,16 +1775,16 @@ local function processCommand(speaker, message)
         return
     elseif cmd == "!freetrial" or cmd == ".freetrial" then
         if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
-            makeStandSpeak("You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
+            whisperToPlayer(speaker, "You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
             return
         end
         if not isFreeTrial(speaker) then
             table.insert(getgenv().FreeTrial, speaker.Name)
-            makeStandSpeak("Thanks for redeeming free trial! You have 5 minutes to use commands.")
+            whisperToPlayer(speaker, "Thanks for redeeming free trial! You have 5 minutes to use commands.")
             showCommandsForRank(speaker)
             spawn(function() processFreeTrial(speaker) end)
         else
-            makeStandSpeak("You already have an active free trial")
+            whisperToPlayer(speaker, "You already have an active free trial")
         end
         return
     end
@@ -1770,7 +1795,7 @@ local function processCommand(speaker, message)
         end
         if isPlayerSuspended(speaker.Name) then
             local remaining = suspendedPlayers[speaker.Name] - os.time()
-            makeStandSpeak(speaker.Name.." is suspended for "..math.floor(remaining).." more seconds")
+            whisperToPlayer(speaker, speaker.Name.." is suspended for "..math.floor(remaining).." more seconds")
             return
         end
         local currentTime = os.time()
@@ -1791,29 +1816,56 @@ local function processCommand(speaker, message)
         return
     end
     if not checkCommandPermissions(speaker, cmd) then
-        makeStandSpeak(speaker.Name..", you don't have permission for this command")
+        whisperToPlayer(speaker, speaker.Name..", you don't have permission for this command")
         return
     end
     if isCommandDisabled(cmd) then
-        makeStandSpeak("This command is currently disabled")
+        whisperToPlayer(speaker, "This command is currently disabled")
         return
     end
     processCommandOriginal(speaker, message)
 end
 
 local function setupChatListeners()
+    -- Regular chat listener
     for _, player in ipairs(Players:GetPlayers()) do
         player.Chatted:Connect(function(message)
             respondToChat(player, message)
             processCommand(player, message)
         end)
     end
+    
     Players.PlayerAdded:Connect(function(player)
         player.Chatted:Connect(function(message)
             respondToChat(player, message)
             processCommand(player, message)
         end)
     end)
+    
+    -- Whisper monitoring
+    if TextChatService then
+        TextChatService.OnIncomingMessage = function(message)
+            local properties = Instance.new("TextChatMessageProperties")
+            if message.TextSource then
+                local speaker = Players:GetPlayerByUserId(message.TextSource.UserId)
+                if speaker then
+                    -- Check if this is a whisper
+                    if message.PrefixText and message.PrefixText:find("to") then
+                        -- Extract recipient name from prefix text
+                        local recipientName = message.PrefixText:match("to (.+):")
+                        if recipientName then
+                            local recipient = Players:FindFirstChild(recipientName)
+                            if recipient then
+                                processWhisper(speaker, recipient, message.Text)
+                            end
+                        end
+                    end
+                end
+            end
+            return properties
+        end
+    end
+    
     Players.PlayerRemoving:Connect(function(player)
         if hasAdminPermissions(player) then
             checkAdminLeft()
