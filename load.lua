@@ -1770,10 +1770,15 @@ local function processCommand(speaker, message)
     local commandPrefix = message:match("^[.!]")
     if not commandPrefix then return end
     local cmd = message:match("^([^%s]+)"):lower()
+
+    -- Allow everyone to see pricing
     if cmd == "!pricing" or cmd == ".pricing" then
         showPricing(speaker)
         return
-    elseif cmd == "!freetrial" or cmd == ".freetrial" then
+    end
+
+    -- Allow everyone to redeem free trial
+    if cmd == "!freetrial" or cmd == ".freetrial" then
         if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
             whisperToPlayer(speaker, "You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
             return
@@ -1788,11 +1793,13 @@ local function processCommand(speaker, message)
         end
         return
     end
+
     if speaker ~= localPlayer then
         if not hasAdminPermissions(speaker) then
-            showPricing(speaker)
-            return
-        end
+        whisperToPlayer(speaker, "Hi "..speaker.Name..", unfortunately you can’t use commands. Try !freetrial to try out or !pricing to buy.")
+        return
+    end
+    
         if isPlayerSuspended(speaker.Name) then
             local remaining = suspendedPlayers[speaker.Name] - os.time()
             whisperToPlayer(speaker, speaker.Name.." is suspended for "..math.floor(remaining).." more seconds")
