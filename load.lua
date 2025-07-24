@@ -53,7 +53,7 @@ local whisperMonitorEnabled = true
 local function isOwner(player)
     for _, ownerName in ipairs(getgenv().Owners) do
         if player.Name == ownerName or (player.DisplayName and player.DisplayName == ownerName) then
-            return true, "owner"
+            return true
         end
     end
     return false
@@ -62,7 +62,7 @@ end
 local function isHeadAdmin(player)
     for _, name in ipairs(getgenv().HeadAdmins) do
         if player.Name == name or (player.DisplayName and player.DisplayName == name) then
-            return true, "headadmin"
+            return true
         end
     end
     return false
@@ -71,7 +71,7 @@ end
 local function isAdmin(player)
     for _, name in ipairs(getgenv().Admins) do
         if player.Name == name or (player.DisplayName and player.DisplayName == name) then
-            return true, "admin"
+            return true
         end
     end
     return false
@@ -80,7 +80,7 @@ end
 local function isFreeTrial(player)
     for _, name in ipairs(getgenv().FreeTrial) do
         if player.Name == name or (player.DisplayName and player.DisplayName == name) then
-            return true, "freetrial"
+            return true
         end
     end
     return false
@@ -111,7 +111,7 @@ local function processFreeTrial(player)
         for i, name in ipairs(getgenv().FreeTrial) do
             if name == player.Name then
                 table.remove(getgenv().FreeTrial, i)
-                whisperToPlayer(player, "Unfortunately "..player.Name..", your trial has expired!")
+                whisperToPlayer(player, "Your trial has expired!")
                 showPricing(player)
                 break
             end
@@ -121,10 +121,8 @@ end
 
 local function whisperToPlayer(player, message)
     if quietModeUsers[player.Name] then
-        -- Use whisper format if quiet mode is enabled for this player
         ChatService:Chat(localPlayer.Character.Head, "/w "..player.Name.." "..message, Enum.ChatColor.White)
     else
-        -- Use normal chat if quiet mode is not enabled
         makeStandSpeak(message)
     end
 end
@@ -200,7 +198,6 @@ local function showCommandsForRank(speaker)
     local cmdList = commands[rank]
     whisperToPlayer(speaker, "Commands for "..rank..":")
     
-    -- send in chunks of 6 so chat doesn't cut messages
     local chunk = {}
     for i, cmd in ipairs(cmdList) do
         table.insert(chunk, cmd)
@@ -211,7 +208,6 @@ local function showCommandsForRank(speaker)
         end
     end
 end
-
 
 local function checkCommandPermissions(speaker, cmd)
     if isOwner(speaker) then return true end
@@ -977,7 +973,6 @@ local function shootPlayer(targetPlayer)
 
     task.wait(0.2)
     
-    -- Don't hide after shooting
     if gun then gun.Parent = localPlayer.Backpack end
 end
 
@@ -1452,17 +1447,14 @@ local function respondToChat(speaker, message)
 end
 
 local function processWhisper(speaker, recipient, message)
-    -- Don't monitor whispers between admins
     if hasAdminPermissions(speaker) or hasAdminPermissions(recipient) then
         return
     end
     
-    -- Check if both players are non-admins
     if not hasAdminPermissions(speaker) and not hasAdminPermissions(recipient) then
         makeStandSpeak(speaker.Name.." private chatted "..recipient.Name.." and said: "..message)
     end
     
-    -- Process commands in whispers
     if message:sub(1,1) == "." or message:sub(1,1) == "!" then
         processCommand(speaker, message)
     end
@@ -1780,13 +1772,11 @@ local function processCommand(speaker, message)
     if not commandPrefix then return end
     local cmd = message:match("^([^%s]+)"):lower()
 
-    -- Allow everyone to see pricing
     if cmd == "!pricing" or cmd == ".pricing" then
         showPricing(speaker)
         return
     end
 
-    -- Allow everyone to redeem free trial
     if cmd == "!freetrial" or cmd == ".freetrial" then
         if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
             whisperToPlayer(speaker, "You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
@@ -1802,8 +1792,12 @@ local function processCommand(speaker, message)
         end
         return
     end
-    -- Check a player's role
+
     if cmd == "!checkrole" or cmd == ".checkrole" then
+        local args = {}
+        for word in message:gmatch("%S+") do
+            table.insert(args, word)
+        end
         if not args[2] then
             whisperToPlayer(speaker, "Usage: !checkrole <username>")
             return
@@ -1832,9 +1826,9 @@ local function processCommand(speaker, message)
 
     if speaker ~= localPlayer then
         if not hasAdminPermissions(speaker) then
-        whisperToPlayer(speaker, "Hi "..speaker.Name..", unfortunately you can’t use commands. Try !freetrial to try out or !pricing to buy.")
-        return
-    end
+            whisperToPlayer(speaker, "Hi "..speaker.Name..", unfortunately you can't use commands. Try !freetrial to try out or !pricing to buy.")
+            return
+        end
 
         if isPlayerSuspended(speaker.Name) then
             local remaining = suspendedPlayers[speaker.Name] - os.time()
@@ -1849,15 +1843,60 @@ local function processCommand(speaker, message)
         end
         commandCooldowns[speaker.Name] = currentTime
     end
-    local args = {}
-    for word in message:gmatch("%S+") do
-        table.insert(args, word)
-    end
-    cmd = args[1]:lower()
+    
     if cmd == ".commands" then
         showCommandsForRank(speaker)
         return
     end
+
+    if cmd == "!freetrial" or cmd == ".freetrial" then
+        local args = {}
+        for word in message:gmatch("%S+") do
+            table.insert(args, word)
+        end
+        if not (isOwner(speaker) or isHeadAdmin(speaker)) then
+            whisperToPlayer(speaker, "Only Owners and HeadAdmins can give free trials!")
+            return
+        end
+
+        if not args[2] then
+            whisperToPlayer(speaker, "Usage: !freetrial <username> [time in minutes]")
+            return
+        end
+
+        local target = findTarget(args[2])
+        if not target then
+            whisperToPlayer(speaker, "Player not found.")
+            return
+        end
+
+        local minutes = tonumber(args[3]) or 5
+        local seconds = minutes * 60
+
+        if hasAdminPermissions(target) then
+            whisperToPlayer(speaker, target.Name.." already has admin permissions!")
+            return
+        end
+
+        table.insert(getgenv().FreeTrial, target.Name)
+        whisperToPlayer(target, "You've been granted a free trial for "..minutes.." minutes!")
+        showCommandsForRank(target)
+        makeStandSpeak(target.Name.." now has a free trial for "..minutes.." minutes!")
+
+        task.spawn(function()
+            task.wait(seconds)
+            for i, name in ipairs(getgenv().FreeTrial) do
+                if name == target.Name then
+                    table.remove(getgenv().FreeTrial, i)
+                    whisperToPlayer(target, "Your free trial has expired!")
+                    showPricing(target)
+                    break
+                end
+            end
+        end)
+        return
+    end
+
     if not checkCommandPermissions(speaker, cmd) then
         whisperToPlayer(speaker, speaker.Name..", you don't have permission for this command")
         return
@@ -1870,7 +1909,6 @@ local function processCommand(speaker, message)
 end
 
 local function setupChatListeners()
-    -- Regular chat listener
     for _, player in ipairs(Players:GetPlayers()) do
         player.Chatted:Connect(function(message)
             respondToChat(player, message)
@@ -1885,16 +1923,13 @@ local function setupChatListeners()
         end)
     end)
     
-    -- Whisper monitoring
     if TextChatService then
         TextChatService.OnIncomingMessage = function(message)
             local properties = Instance.new("TextChatMessageProperties")
             if message.TextSource then
                 local speaker = Players:GetPlayerByUserId(message.TextSource.UserId)
                 if speaker then
-                    -- Check if this is a whisper
                     if message.PrefixText and message.PrefixText:find("to") then
-                        -- Extract recipient name from prefix text
                         local recipientName = message.PrefixText:match("to (.+):")
                         if recipientName then
                             local recipient = Players:FindFirstChild(recipientName)
