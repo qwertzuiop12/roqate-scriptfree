@@ -1802,6 +1802,33 @@ local function processCommand(speaker, message)
         end
         return
     end
+    -- Check a player's role
+    if cmd == "!checkrole" or cmd == ".checkrole" then
+        if not args[2] then
+            whisperToPlayer(speaker, "Usage: !checkrole <username>")
+            return
+        end
+
+        local target = findTarget(table.concat(args, " ", 2))
+        if not target then
+            whisperToPlayer(speaker, "Player not found.")
+            return
+        end
+
+        local role = "No special role"
+        if isOwner(target) then
+            role = "Owner"
+        elseif isHeadAdmin(target) then
+            role = "HeadAdmin"
+        elseif isAdmin(target) then
+            role = "Admin"
+        elseif isFreeTrial(target) then
+            role = "Free Trial User"
+        end
+
+        whisperToPlayer(speaker, target.Name.." is "..role..".")
+        return
+    end
 
     if speaker ~= localPlayer then
         if not hasAdminPermissions(speaker) then
