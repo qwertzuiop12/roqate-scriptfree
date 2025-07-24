@@ -166,8 +166,7 @@ local function showCommandsForRank(speaker)
     elseif isFreeTrial(speaker) then
         rank = "freetrial"
     else
-        whisperToPlayer(speaker, "You don't have permission to use commands.")
-        showPricing(speaker)
+        whisperToPlayer(speaker, "You don't have permission to use commands. Try !freetrial or !pricing.")
         return
     end
 
@@ -176,17 +175,20 @@ local function showCommandsForRank(speaker)
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
             ".fling", ".bringgun", ".whitelist", ".addowner", ".addadmin", ".removeadmin", 
             ".sus", ".stopsus", ".eliminate", ".win", ".commands", ".disable", ".enable", 
-            ".stopcmds", ".rejoin", ".quit", ".describe", ".headadmin", ".pricing", ".freetrial", ".trade", ".eliminateall", ".shoot", ".quiet"
+            ".stopcmds", ".rejoin", ".quit", ".describe", ".headadmin", ".pricing", 
+            ".freetrial", ".trade", ".eliminateall", ".shoot", ".quiet"
         },
         headadmin = {
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
             ".fling", ".bringgun", ".whitelist", ".addadmin", ".sus", ".stopsus", 
-            ".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe", ".pricing", ".freetrial", ".trade", ".shoot", ".quiet"
+            ".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe", 
+            ".pricing", ".freetrial", ".trade", ".shoot", ".quiet"
         },
         admin = {
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
             ".fling", ".bringgun", ".sus", ".stopsus", ".eliminate", ".win", 
-            ".commands", ".stopcmds", ".describe", ".pricing", ".freetrial", ".trade", ".shoot", ".quiet"
+            ".commands", ".stopcmds", ".describe", ".pricing", ".freetrial", ".trade", 
+            ".shoot", ".quiet"
         },
         freetrial = {
             ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon",
@@ -195,14 +197,21 @@ local function showCommandsForRank(speaker)
         }
     }
 
+    local cmdList = commands[rank]
     whisperToPlayer(speaker, "Commands for "..rank..":")
-    for i, cmd in ipairs(commands[rank]) do
-        if i % 5 == 0 then
-            task.wait(1)
+    
+    -- send in chunks of 6 so chat doesn't cut messages
+    local chunk = {}
+    for i, cmd in ipairs(cmdList) do
+        table.insert(chunk, cmd)
+        if #chunk == 6 or i == #cmdList then
+            whisperToPlayer(speaker, table.concat(chunk, " | "))
+            chunk = {}
+            task.wait(0.3)
         end
-        whisperToPlayer(speaker, cmd)
     end
 end
+
 
 local function checkCommandPermissions(speaker, cmd)
     if isOwner(speaker) then return true end
@@ -1799,7 +1808,7 @@ local function processCommand(speaker, message)
         whisperToPlayer(speaker, "Hi "..speaker.Name..", unfortunately you can’t use commands. Try !freetrial to try out or !pricing to buy.")
         return
     end
-    
+
         if isPlayerSuspended(speaker.Name) then
             local remaining = suspendedPlayers[speaker.Name] - os.time()
             whisperToPlayer(speaker, speaker.Name.." is suspended for "..math.floor(remaining).." more seconds")
