@@ -6,6 +6,7 @@ local TextChatService = game:GetService("TextChatService")
 local localPlayer = Players.LocalPlayer
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 
 local FOLLOW_OFFSET = Vector3.new(0, 3, 5)
 local MOVEMENT_SMOOTHNESS = 0.1
@@ -14,6 +15,19 @@ local SUS_ANIMATION_R6 = "72042024"
 local SUS_ANIMATION_R15 = "698251653"
 local STAND_ANIMATION_ID = "10714347256"
 
+-- Configuration
+local config = {
+    Prefix = ".",
+    Discord = {
+        WebhookURL = "https://discord.com/api/webhooks/1398448940889673880/_9Z0T6fqJtoRrkixT3NRQLUReS56kDQo1rNaMMue7jRhQYU24nyZ-itvRmZ-GiKfenuB", -- Add your Discord webhook URL here
+        Token = "MTM5ODQ1MTE4MjAxMTI4NTUxNQ.GdgN5C.46JSnt3wh_0CLhs8ndaWA19TFxGOzC_O2bU_Es", -- Add your Discord bot token here
+        ChannelID = "1398448911097794620", -- Add your Discord channel ID here
+        Enabled = true -- Set to true to enable Discord logging
+    },
+    AllowedPrefixes = {".", "/", "?", "!", "'", ":", ";", "@", "*", "&", "+", "_", "-", "=", "[", "{", "|", "~", "`"}
+}
+
+-- Global variables
 local owners = {}
 local heartbeatConnection = nil
 local protectionConnection = nil
@@ -49,6 +63,66 @@ local autoFarmActive = false
 local autoFarmConnection = nil
 local quietModeUsers = {}
 local whisperMonitorEnabled = true
+
+-- Discord logging functions
+local function logToDiscord(message)
+    if not config.Discord.Enabled or config.Discord.WebhookURL == "" then return end
+    
+    local success, err = pcall(function()
+        local data = {
+            ["content"] = message,
+            ["username"] = "Stand Admin Logs"
+        }
+        
+        local jsonData = HttpService:JSONEncode(data)
+        HttpService:PostAsync(config.Discord.WebhookURL, jsonData)
+    end)
+    
+    if not success then
+        warn("Failed to log to Discord: "..tostring(err))
+    end
+end
+
+local function logCommand(speaker, command)
+    if not config.Discord.Enabled then return end
+    
+    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+    local logMessage = string.format("[%s] %s used command: %s", timestamp, speaker.Name, command)
+    logToDiscord(logMessage)
+end
+
+local function logAdminChange(admin, target, rank, action)
+    if not config.Discord.Enabled then return end
+    
+    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+    local logMessage = string.format("[%s] %s %s %s as %s", timestamp, admin.Name, action, target, rank)
+    logToDiscord(logMessage)
+end
+
+-- Utility functions
+local function splitMessage(message, maxLength)
+    local result = {}
+    local current = ""
+    
+    for word in message:gmatch("%S+") do
+        if #current + #word + 1 > maxLength then
+            table.insert(result, current)
+            current = word
+        else
+            if current == "" then
+                current = word
+            else
+                current = current .. " " .. word
+            end
+        end
+    end
+    
+    if current ~= "" then
+        table.insert(result, current)
+    end
+    
+    return result
+end
 
 local function isOwner(player)
     for _, ownerName in ipairs(getgenv().Owners) do
@@ -139,18 +213,25 @@ local function showPricing(speaker)
         end
     end
 
-    whisperToPlayer(speaker, "Admin costs 100 Robux or 1 godly (Basic commands)")
-    whisperToPlayer(speaker, "Head Admin costs 500 Robux or 5 godly (Can sell admin)")
+    local messages = {
+        "Admin costs 100 Robux or 1 godly (Basic commands)",
+        "Head Admin costs 500 Robux or 5 godly (Can sell admin)"
+    }
 
     if #availableOwners > 0 then
-        whisperToPlayer(speaker, "Available owners to pay: "..table.concat(availableOwners, ", "))
+        table.insert(messages, "Available owners to pay: "..table.concat(availableOwners, ", "))
     end
 
     if #availableAdmins > 0 then
-        whisperToPlayer(speaker, "Available head admins to pay: "..table.concat(availableAdmins, ", "))
+        table.insert(messages, "Available head admins to pay: "..table.concat(availableAdmins, ", "))
     end
 
-    whisperToPlayer(speaker, "Type !freetrial to test commands for 5 minutes")
+    table.insert(messages, "Type !freetrial to test commands for 5 minutes")
+
+    for _, msg in ipairs(messages) do
+        whisperToPlayer(speaker, msg)
+        task.wait(1)
+    end
 end
 
 local function showCommandsForRank(speaker)
@@ -170,28 +251,27 @@ local function showCommandsForRank(speaker)
 
     local commands = {
         owner = {
-            ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
-            ".fling", ".bringgun", ".whitelist", ".addowner", ".addadmin", ".removeadmin", 
-            ".sus", ".stopsus", ".eliminate", ".win", ".commands", ".disable", ".enable", 
-            ".stopcmds", ".rejoin", ".quit", ".describe", ".headadmin", ".pricing", 
-            ".freetrial", ".trade", ".eliminateall", ".shoot", ".quiet"
+            config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon", 
+            config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."whitelist", config.Prefix.."addowner", config.Prefix.."addadmin", config.Prefix.."removeadmin", 
+            config.Prefix.."sus", config.Prefix.."stopsus", config.Prefix.."eliminate", config.Prefix.."win", config.Prefix.."commands", config.Prefix.."disable", config.Prefix.."enable", 
+            config.Prefix.."stopcmds", config.Prefix.."rejoin", config.Prefix.."quit", config.Prefix.."describe", config.Prefix.."headadmin", config.Prefix.."pricing", 
+            config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."eliminateall", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."prefix"
         },
         headadmin = {
-            ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
-            ".fling", ".bringgun", ".whitelist", ".addadmin", ".sus", ".stopsus", 
-            ".eliminate", ".win", ".commands", ".stopcmds", ".rejoin", ".describe", 
-            ".pricing", ".freetrial", ".trade", ".shoot", ".quiet"
+            config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon", 
+            config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."whitelist", config.Prefix.."addadmin", config.Prefix.."sus", config.Prefix.."stopsus", 
+            config.Prefix.."eliminate", config.Prefix.."win", config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."rejoin", config.Prefix.."describe", 
+            config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."shoot", config.Prefix.."quiet"
         },
         admin = {
-            ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon", 
-            ".fling", ".bringgun", ".sus", ".stopsus", ".eliminate", ".win", 
-            ".commands", ".stopcmds", ".describe", ".pricing", ".freetrial", ".trade", 
-            ".shoot", ".quiet"
+            config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon", 
+            config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."sus", config.Prefix.."stopsus", config.Prefix.."eliminate", config.Prefix.."win", 
+            config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."describe", config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."shoot", config.Prefix.."quiet"
         },
         freetrial = {
-            ".follow", ".protect", ".say", ".reset", ".hide", ".dismiss", ".summon",
-            ".fling", ".bringgun", ".sus", ".stopsus", ".eliminate", ".win", 
-            ".commands", ".stopcmds", ".describe", ".pricing", ".shoot", ".quiet"
+            config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon",
+            config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."sus", config.Prefix.."stopsus", config.Prefix.."eliminate", config.Prefix.."win", 
+            config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."describe", config.Prefix.."pricing", config.Prefix.."shoot", config.Prefix.."quiet"
         }
     }
 
@@ -212,21 +292,21 @@ end
 local function checkCommandPermissions(speaker, cmd)
     if isOwner(speaker) then return true end
     if isHeadAdmin(speaker) then
-        if cmd == ".addowner" or cmd == ".removeadmin" or cmd == ".disable" or cmd == ".enable" or cmd == ".quit" then
+        if cmd == config.Prefix.."addowner" or cmd == config.Prefix.."removeadmin" or cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" then
             return false
         end
         return true
     end
     if isAdmin(speaker) then
-        if cmd == ".addowner" or cmd == ".addadmin" or cmd == ".removeadmin" or cmd == ".whitelist" or 
-            cmd == ".disable" or cmd == ".enable" or cmd == ".quit" or cmd == ".headadmin" then
+        if cmd == config.Prefix.."addowner" or cmd == config.Prefix.."addadmin" or cmd == config.Prefix.."removeadmin" or cmd == config.Prefix.."whitelist" or 
+            cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" or cmd == config.Prefix.."headadmin" then
             return false
         end
         return true
     end
     if isFreeTrial(speaker) then
-        if cmd == ".addowner" or cmd == ".addadmin" or cmd == ".removeadmin" or cmd == ".whitelist" or 
-            cmd == ".disable" or cmd == ".enable" or cmd == ".quit" or cmd == ".headadmin" or cmd == ".trade" or cmd == ".eliminateall" then
+        if cmd == config.Prefix.."addowner" or cmd == config.Prefix.."addadmin" or cmd == config.Prefix.."removeadmin" or cmd == config.Prefix.."whitelist" or 
+            cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" or cmd == config.Prefix.."headadmin" or cmd == config.Prefix.."trade" or cmd == config.Prefix.."eliminateall" then
             return false
         end
         return true
@@ -381,10 +461,26 @@ local function makeStandSpeak(message)
     if not localPlayer.Character then return end
     local head = localPlayer.Character:FindFirstChild("Head")
     if head then
-        ChatService:Chat(head, message, Enum.ChatColor.White)
+        if #message > 200 then
+            local chunks = splitMessage(message, 200)
+            for _, chunk in ipairs(chunks) do
+                ChatService:Chat(head, chunk, Enum.ChatColor.White)
+                task.wait(1)
+            end
+        else
+            ChatService:Chat(head, message, Enum.ChatColor.White)
+        end
     end
     if TextChatService and TextChatService.TextChannels and TextChatService.TextChannels.RBXGeneral then
-        TextChatService.TextChannels.RBXGeneral:SendAsync(message)
+        if #message > 200 then
+            local chunks = splitMessage(message, 200)
+            for _, chunk in ipairs(chunks) do
+                TextChatService.TextChannels.RBXGeneral:SendAsync(chunk)
+                task.wait(1)
+            end
+        else
+            TextChatService.TextChannels.RBXGeneral:SendAsync(message)
+        end
     end
 end
 
@@ -1056,18 +1152,21 @@ local function addOwner(playerName)
     end
     makeStandSpeak("Added "..playerName.." as owner!")
     showCommandsForRank(Players:FindFirstChild(playerName))
+    logAdminChange(localPlayer, playerName, "owner", "added")
 end
 
 local function addHeadAdmin(playerName)
     table.insert(getgenv().HeadAdmins, playerName)
     makeStandSpeak("Added "..playerName.." as head admin!")
     showCommandsForRank(Players:FindFirstChild(playerName))
+    logAdminChange(localPlayer, playerName, "head admin", "added")
 end
 
 local function addAdmin(playerName)
     table.insert(getgenv().Admins, playerName)
     makeStandSpeak("Added "..playerName.." as admin!")
     showCommandsForRank(Players:FindFirstChild(playerName))
+    logAdminChange(localPlayer, playerName, "admin", "added")
 end
 
 local function removeOwner(playerName)
@@ -1079,6 +1178,7 @@ local function removeOwner(playerName)
     end
     owners = findOwners()
     makeStandSpeak("Removed "..playerName.." from owners!")
+    logAdminChange(localPlayer, playerName, "owner", "removed")
 end
 
 local function removeAdmin(playerName)
@@ -1089,6 +1189,7 @@ local function removeAdmin(playerName)
         end
     end
     makeStandSpeak("Removed "..playerName.." from admins!")
+    logAdminChange(localPlayer, playerName, "admin", "removed")
 end
 
 local function disableCommand(cmd)
@@ -1263,12 +1364,12 @@ local function showCommands(speaker)
     end
     lastCommandsTime = currentTime
     local commandGroups = {
-        ".follow (user/murder/sheriff/random), .protect (on/off), .say (message), .reset, .hide",
-        ".dismiss, .summon, .fling (all/sheriff/murder/user/random), .bringgun, .whitelist (user)",
-        ".addowner (user), .removeadmin (user), .sus (user/murder/sheriff/random) (speed), .stopsus",
-        ".eliminate (random), .win (user), .commands, .disable (cmd), .enable (cmd), .stopcmds, .rejoin",
-        ".describe (user/murd/sheriff), .headadmin (user), .pricing, .freetrial, .trade (user), .eliminateall",
-        ".shoot (user/murd), .quiet (on/off)."
+        config.Prefix.."follow (user/murder/sheriff/random), "..config.Prefix.."protect (on/off), "..config.Prefix.."say (message), "..config.Prefix.."reset, "..config.Prefix.."hide",
+        config.Prefix.."dismiss, "..config.Prefix.."summon, "..config.Prefix.."fling (all/sheriff/murder/user/random), "..config.Prefix.."bringgun, "..config.Prefix.."whitelist (user)",
+        config.Prefix.."addowner (user), "..config.Prefix.."removeadmin (user), "..config.Prefix.."sus (user/murder/sheriff/random) (speed), "..config.Prefix.."stopsus",
+        config.Prefix.."eliminate (random), "..config.Prefix.."win (user), "..config.Prefix.."commands, "..config.Prefix.."disable (cmd), "..config.Prefix.."enable (cmd), "..config.Prefix.."stopcmds, "..config.Prefix.."rejoin",
+        config.Prefix.."describe (user/murd/sheriff), "..config.Prefix.."headadmin (user), "..config.Prefix.."pricing, "..config.Prefix.."freetrial, "..config.Prefix.."trade (user), "..config.Prefix.."eliminateall",
+        config.Prefix.."shoot (user/murd), "..config.Prefix.."quiet (on/off), "..config.Prefix.."prefix (new prefix)"
     }
     for _, group in ipairs(commandGroups) do
         makeStandSpeak(group)
@@ -1455,14 +1556,14 @@ local function processWhisper(speaker, recipient, message)
         makeStandSpeak(speaker.Name.." private chatted "..recipient.Name.." and said: "..message)
     end
     
-    if message:sub(1,1) == "." or message:sub(1,1) == "!" then
+    if message:sub(1,1) == config.Prefix or message:sub(1,1) == "!" then
         processCommand(speaker, message)
     end
 end
 
 local function processCommandOriginal(speaker, message)
     if not message then return end
-    local commandPrefix = message:match("^%.")
+    local commandPrefix = message:match("^["..config.Prefix.."!]")
     if not commandPrefix then return end
     if tick() - lastCommandTime < commandDelay then return end
     lastCommandTime = tick()
@@ -1471,13 +1572,14 @@ local function processCommandOriginal(speaker, message)
         table.insert(args, word)
     end
     local cmd = args[1]:lower()
-    if cmd == ".stopcmds" then
+    
+    if cmd == config.Prefix.."stopcmds" then
         stopActiveCommand()
         whisperToPlayer(speaker, "All active commands stopped!")
-    elseif cmd == ".rejoin" then
+    elseif cmd == config.Prefix.."rejoin" then
         whisperToPlayer(speaker, "Rejoining game...")
         TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, localPlayer)
-    elseif cmd == ".quit" then
+    elseif cmd == config.Prefix.."quit" then
         if isOwner(speaker) then
             whisperToPlayer(speaker, "Terminating session for "..speaker.Name.."!")
             wait(0.5)
@@ -1485,7 +1587,7 @@ local function processCommandOriginal(speaker, message)
         else
             checkAdminLeft()
         end
-    elseif cmd == ".follow" and args[2] then
+    elseif cmd == config.Prefix.."follow" and args[2] then
         local targetName = args[2]:lower()
         if targetName == "murder" then
             local target = findPlayerWithTool("Knife")
@@ -1524,29 +1626,29 @@ local function processCommandOriginal(speaker, message)
                 whisperToPlayer(speaker, "Target not found")
             end
         end
-    elseif cmd == ".protect" and args[2] then
+    elseif cmd == config.Prefix.."protect" and args[2] then
         if args[2]:lower() == "on" then
             startProtection()
         elseif args[2]:lower() == "off" then
             stopProtection()
         end
-    elseif cmd == ".say" and args[2] then
+    elseif cmd == config.Prefix.."say" and args[2] then
         makeStandSpeak(table.concat(args, " ", 2))
-    elseif cmd == ".reset" then
+    elseif cmd == config.Prefix.."reset" then
         resetStand()
-    elseif cmd == ".hide" then
+    elseif cmd == config.Prefix.."hide" then
         hideStand()
-    elseif cmd == ".dismiss" then
+    elseif cmd == config.Prefix.."dismiss" then
         dismissStand()
-    elseif cmd == ".summon" then
+    elseif cmd == config.Prefix.."summon" then
         summonStand(speaker)
-    elseif cmd == ".autofarm" and args[2] then
+    elseif cmd == config.Prefix.."autofarm" and args[2] then
         if args[2]:lower() == "on" then
             autoFarm()
         elseif args[2]:lower() == "off" then
             stopAutoFarm()
         end
-    elseif cmd == ".fling" and args[2] then
+    elseif cmd == config.Prefix.."fling" and args[2] then
         local targetName = args[2]:lower()
         if targetName == "all" then
             for _, player in ipairs(Players:GetPlayers()) do
@@ -1588,16 +1690,16 @@ local function processCommandOriginal(speaker, message)
                 whisperToPlayer(speaker, "Target not found")
             end
         end
-    elseif cmd == ".bringgun" then
+    elseif cmd == config.Prefix.."bringgun" then
         stealGun(speaker)
-    elseif cmd == ".whitelist" and args[2] then
+    elseif cmd == config.Prefix.."whitelist" and args[2] then
         local target = findTarget(table.concat(args, " ", 2))
         if target then
             whitelistPlayer(target.Name)
         else
             whisperToPlayer(speaker, "Player not found")
         end
-    elseif cmd == ".addowner" and args[2] then
+    elseif cmd == config.Prefix.."addowner" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
@@ -1610,7 +1712,7 @@ local function processCommandOriginal(speaker, message)
         else
             whisperToPlayer(speaker, "Player not found")
         end
-    elseif cmd == ".headadmin" and args[2] then
+    elseif cmd == config.Prefix.."headadmin" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
@@ -1623,7 +1725,7 @@ local function processCommandOriginal(speaker, message)
         else
             whisperToPlayer(speaker, "Player not found")
         end
-    elseif cmd == ".addadmin" and args[2] then
+    elseif cmd == config.Prefix.."addadmin" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
@@ -1636,7 +1738,7 @@ local function processCommandOriginal(speaker, message)
         else
             whisperToPlayer(speaker, "Player not found")
         end
-    elseif cmd == ".removeadmin" and args[2] then
+    elseif cmd == config.Prefix.."removeadmin" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
@@ -1649,7 +1751,7 @@ local function processCommandOriginal(speaker, message)
         else
             whisperToPlayer(speaker, "Player not found")
         end
-    elseif cmd == ".sus" and args[2] then
+    elseif cmd == config.Prefix.."sus" and args[2] then
         local targetName = args[2]:lower()
         local speed = tonumber(args[3])
         if targetName == "murder" then
@@ -1682,9 +1784,9 @@ local function processCommandOriginal(speaker, message)
                 whisperToPlayer(speaker, "Target not found")
             end
         end
-    elseif cmd == ".stopsus" then
+    elseif cmd == config.Prefix.."stopsus" then
         stopSus()
-    elseif cmd == ".eliminate" then
+    elseif cmd == config.Prefix.."eliminate" then
         if args[2] and args[2]:lower() == "random" then
             local target = getRandomPlayer()
             if target then
@@ -1696,18 +1798,18 @@ local function processCommandOriginal(speaker, message)
         else
             eliminatePlayers()
         end
-    elseif cmd == ".eliminateall" then
+    elseif cmd == config.Prefix.."eliminateall" then
         eliminateAllPlayers()
-    elseif cmd == ".win" and args[2] then
+    elseif cmd == config.Prefix.."win" and args[2] then
         local target = findTarget(table.concat(args, " ", 2))
         if target then
             winGame(target)
         else
             whisperToPlayer(speaker, "Player not found")
         end
-    elseif cmd == ".commands" then
+    elseif cmd == config.Prefix.."commands" then
         showCommandsForRank(speaker)
-    elseif cmd == ".disable" and args[2] then
+    elseif cmd == config.Prefix.."disable" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
@@ -1715,7 +1817,7 @@ local function processCommandOriginal(speaker, message)
             return
         end
         disableCommand(args[2])
-    elseif cmd == ".enable" and args[2] then
+    elseif cmd == config.Prefix.."enable" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
             local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
@@ -1723,13 +1825,13 @@ local function processCommandOriginal(speaker, message)
             return
         end
         enableCommand(args[2])
-    elseif cmd == ".describe" and args[2] then
+    elseif cmd == config.Prefix.."describe" and args[2] then
         local messages = describePlayer(table.concat(args, " ", 2))
         for _, msg in ipairs(messages) do
             whisperToPlayer(speaker, msg)
             task.wait(1.5)
         end
-    elseif cmd == ".shoot" and args[2] then
+    elseif cmd == config.Prefix.."shoot" and args[2] then
         local targetName = args[2]:lower()
         if targetName == "murder" then
             local target = findPlayerWithTool("Knife")
@@ -1748,14 +1850,14 @@ local function processCommandOriginal(speaker, message)
                 whisperToPlayer(speaker, "Target not found")
             end
         end
-    elseif cmd == ".trade" and args[2] then
+    elseif cmd == config.Prefix.."trade" and args[2] then
         local target = findTarget(table.concat(args, " ", 2))
         if target then
             tradePlayer(target)
         else
             whisperToPlayer(speaker, "Player not found")
         end
-    elseif cmd == ".quiet" and args[2] then
+    elseif cmd == config.Prefix.."quiet" and args[2] then
         if args[2]:lower() == "on" then
             quietModeUsers[speaker.Name] = true
             whisperToPlayer(speaker, "Quiet mode enabled for you. I'll whisper responses.")
@@ -1763,67 +1865,97 @@ local function processCommandOriginal(speaker, message)
             quietModeUsers[speaker.Name] = nil
             whisperToPlayer(speaker, "Quiet mode disabled. I'll speak normally.")
         end
+    elseif cmd == config.Prefix.."prefix" and args[2] then
+        if not isMainOwner(speaker) then
+            local mainOwner = getMainOwner()
+            local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
+            whisperToPlayer(speaker, "Only "..ownerName.." can use this command!")
+            return
+        end
+        
+        local newPrefix = args[2]
+        if #newPrefix ~= 1 then
+            whisperToPlayer(speaker, "Prefix must be a single character!")
+            return
+        end
+        
+        local isValid = false
+        for _, allowedPrefix in ipairs(config.AllowedPrefixes) do
+            if newPrefix == allowedPrefix then
+                isValid = true
+                break
+            end
+        end
+        
+        if not isValid then
+            whisperToPlayer(speaker, "Invalid prefix! Allowed prefixes: "..table.concat(config.AllowedPrefixes, ", "))
+            return
+        end
+        
+        config.Prefix = newPrefix
+        whisperToPlayer(speaker, "Command prefix changed to: "..newPrefix)
+        logToDiscord("Prefix changed to: "..newPrefix.." by "..speaker.Name)
     end
 end
 
 local function processCommand(speaker, message)
     if not message then return end
-    local commandPrefix = message:match("^[.!]")
+    local commandPrefix = message:match("^["..config.Prefix.."!]")
     if not commandPrefix then return end
-    local cmd = message:match("^([^%s]+)"):lower()
+    
+    if message:sub(1,1) == "!" then
+        -- Handle special commands with ! prefix
+        local cmd = message:match("^([^%s]+)"):lower()
+        
+        if cmd == "!pricing" then
+            showPricing(speaker)
+            return
+        elseif cmd == "!freetrial" then
+            if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
+                whisperToPlayer(speaker, "You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
+                return
+            end
+            if not isFreeTrial(speaker) then
+                table.insert(getgenv().FreeTrial, speaker.Name)
+                whisperToPlayer(speaker, "Thanks for redeeming free trial! You have 5 minutes to use commands.")
+                showCommandsForRank(speaker)
+                spawn(function() processFreeTrial(speaker) end)
+            else
+                whisperToPlayer(speaker, "You already have an active free trial")
+            end
+            return
+        elseif cmd == "!checkrole" then
+            local args = {}
+            for word in message:gmatch("%S+") do
+                table.insert(args, word)
+            end
+            if not args[2] then
+                whisperToPlayer(speaker, "Usage: !checkrole <username>")
+                return
+            end
 
-    if cmd == "!pricing" or cmd == ".pricing" then
-        showPricing(speaker)
-        return
-    end
+            local target = findTarget(table.concat(args, " ", 2))
+            if not target then
+                whisperToPlayer(speaker, "Player not found.")
+                return
+            end
 
-    if cmd == "!freetrial" or cmd == ".freetrial" then
-        if isOwner(speaker) or isHeadAdmin(speaker) or isAdmin(speaker) then
-            whisperToPlayer(speaker, "You already have "..(isOwner(speaker) and "owner" or isHeadAdmin(speaker) and "headadmin" or "admin").." privileges!")
+            local role = "No special role"
+            if isOwner(target) then
+                role = "Owner"
+            elseif isHeadAdmin(target) then
+                role = "HeadAdmin"
+            elseif isAdmin(target) then
+                role = "Admin"
+            elseif isFreeTrial(target) then
+                role = "Free Trial User"
+            end
+
+            whisperToPlayer(speaker, target.Name.." is "..role..".")
             return
         end
-        if not isFreeTrial(speaker) then
-            table.insert(getgenv().FreeTrial, speaker.Name)
-            whisperToPlayer(speaker, "Thanks for redeeming free trial! You have 5 minutes to use commands.")
-            showCommandsForRank(speaker)
-            spawn(function() processFreeTrial(speaker) end)
-        else
-            whisperToPlayer(speaker, "You already have an active free trial")
-        end
-        return
     end
-
-    if cmd == "!checkrole" or cmd == ".checkrole" then
-        local args = {}
-        for word in message:gmatch("%S+") do
-            table.insert(args, word)
-        end
-        if not args[2] then
-            whisperToPlayer(speaker, "Usage: !checkrole <username>")
-            return
-        end
-
-        local target = findTarget(table.concat(args, " ", 2))
-        if not target then
-            whisperToPlayer(speaker, "Player not found.")
-            return
-        end
-
-        local role = "No special role"
-        if isOwner(target) then
-            role = "Owner"
-        elseif isHeadAdmin(target) then
-            role = "HeadAdmin"
-        elseif isAdmin(target) then
-            role = "Admin"
-        elseif isFreeTrial(target) then
-            role = "Free Trial User"
-        end
-
-        whisperToPlayer(speaker, target.Name.." is "..role..".")
-        return
-    end
-
+    
     if speaker ~= localPlayer then
         if not hasAdminPermissions(speaker) then
             whisperToPlayer(speaker, "Hi "..speaker.Name..", unfortunately you can't use commands. Try !freetrial to try out or !pricing to buy.")
@@ -1844,68 +1976,26 @@ local function processCommand(speaker, message)
         commandCooldowns[speaker.Name] = currentTime
     end
     
-    if cmd == ".commands" then
-        showCommandsForRank(speaker)
-        return
-    end
-
-    if cmd == "!freetrial" or cmd == ".freetrial" then
-        local args = {}
-        for word in message:gmatch("%S+") do
-            table.insert(args, word)
-        end
-        if not (isOwner(speaker) or isHeadAdmin(speaker)) then
-            whisperToPlayer(speaker, "Only Owners and HeadAdmins can give free trials!")
+    if message:sub(1,1) == config.Prefix then
+        local cmd = message:match("^([^%s]+)"):lower()
+        
+        if cmd == config.Prefix.."commands" then
+            showCommandsForRank(speaker)
             return
         end
 
-        if not args[2] then
-            whisperToPlayer(speaker, "Usage: !freetrial <username> [time in minutes]")
+        if not checkCommandPermissions(speaker, cmd) then
+            whisperToPlayer(speaker, speaker.Name..", you don't have permission for this command")
             return
         end
-
-        local target = findTarget(args[2])
-        if not target then
-            whisperToPlayer(speaker, "Player not found.")
+        if isCommandDisabled(cmd) then
+            whisperToPlayer(speaker, "This command is currently disabled")
             return
         end
-
-        local minutes = tonumber(args[3]) or 5
-        local seconds = minutes * 60
-
-        if hasAdminPermissions(target) then
-            whisperToPlayer(speaker, target.Name.." already has admin permissions!")
-            return
-        end
-
-        table.insert(getgenv().FreeTrial, target.Name)
-        whisperToPlayer(target, "You've been granted a free trial for "..minutes.." minutes!")
-        showCommandsForRank(target)
-        makeStandSpeak(target.Name.." now has a free trial for "..minutes.." minutes!")
-
-        task.spawn(function()
-            task.wait(seconds)
-            for i, name in ipairs(getgenv().FreeTrial) do
-                if name == target.Name then
-                    table.remove(getgenv().FreeTrial, i)
-                    whisperToPlayer(target, "Your free trial has expired!")
-                    showPricing(target)
-                    break
-                end
-            end
-        end)
-        return
+        
+        logCommand(speaker, message)
+        processCommandOriginal(speaker, message)
     end
-
-    if not checkCommandPermissions(speaker, cmd) then
-        whisperToPlayer(speaker, speaker.Name..", you don't have permission for this command")
-        return
-    end
-    if isCommandDisabled(cmd) then
-        whisperToPlayer(speaker, "This command is currently disabled")
-        return
-    end
-    processCommandOriginal(speaker, message)
 end
 
 local function setupChatListeners()
