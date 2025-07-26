@@ -20,7 +20,7 @@ local config = {
     Prefix = ".",
     Discord = {
         WebhookURL = "https://discord.com/api/webhooks/1398448940889673880/_9Z0T6fqJtoRrkixT3NRQLUReS56kDQo1rNaMMue7jRhQYU24nyZ-itvRmZ-GiKfenuB", -- Add your Discord webhook URL here
-        Token = "MTM5ODQ1MTE4MjAxMTI4NTUxNQ.GTEPoB.pB9G0U9p5pLEsNkG8WhqRrsCjP8r_Q9BvXBAgc", -- Add your Discord bot token here
+        Token = "", -- Add your Discord bot token here
         ChannelID = "1398448911097794620", -- Add your Discord channel ID here
         Enabled = true -- Set to true to enable Discord logging
     },
