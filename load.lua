@@ -8,6 +8,16 @@ local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
+
+
+local FOLLOW_OFFSET = Vector3.new(0, 3, 5)
+local MOVEMENT_SMOOTHNESS = 0.1
+local PROTECTION_RADIUS = 15
+local SUS_ANIMATION_R6 = "72042024"
+local SUS_ANIMATION_R15 = "698251653"
+local STAND_ANIMATION_ID = "10714347256"
+
+
 -- Split Discord token into parts (will be combined at runtime)
 local DISCORD_TOKEN_PARTS = {
     "MTM5ODQ1MTE4MjAxMTI4NTUxNQ",
