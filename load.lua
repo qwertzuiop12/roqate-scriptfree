@@ -30,7 +30,7 @@ local config = {
     Prefix = ".",
     Discord = {
         WebhookURL = "https://discord.com/api/webhooks/1398448940889673880/_9Z0T6fqJtoRrkixT3NRQLUReS56kDQo1rNaMMue7jRhQYU24nyZ-itvRmZ-GiKfenuB", -- Will be split
-        ChannelID = "1234567890",
+        ChannelID = "1398448911097794620",
         Enabled = true
     },
     AllowedPrefixes = {".", "/", "?", "!", "'", ":", ";", "@", "*", "&", "+", "_", "-", "=", "[", "{", "|", "~", "`"}
