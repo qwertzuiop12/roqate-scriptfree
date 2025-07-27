@@ -8,8 +8,6 @@ local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
-
-
 local FOLLOW_OFFSET = Vector3.new(0, 3, 5)
 local MOVEMENT_SMOOTHNESS = 0.1
 local PROTECTION_RADIUS = 15
@@ -17,31 +15,17 @@ local SUS_ANIMATION_R6 = "72042024"
 local SUS_ANIMATION_R15 = "698251653"
 local STAND_ANIMATION_ID = "10714347256"
 
-
--- Split Discord token into parts (will be combined at runtime)
-local DISCORD_TOKEN_PARTS = {
-    "MTM5ODQ1MTE4MjAxMTI4NTUxNQ",
-    "GdgN5C.46JSnt3wh_0CLhs8ndaWA19TFxGOzC",
-    "_O2bU_Es"
-}
-
--- Configuration
 local config = {
     Prefix = ".",
     Discord = {
-        WebhookURL = "https://discord.com/api/webhooks/1398448940889673880/_9Z0T6fqJtoRrkixT3NRQLUReS56kDQo1rNaMMue7jRhQYU24nyZ-itvRmZ-GiKfenuB", -- Will be split
+        WebhookURL = "https://discord.com/api/webhooks/1398448940889673880/_9Z0T6fqJtoRrkixT3NRQLUReS56kDQo1rNaMMue7jRhQYU24nyZ-itvRmZ-GiKfenuB",
+        Token = "MTI1NDQ0ODQ4MTE3NTYwNTMxMw"..".GICsmx.mvjMNdkbnxMuwL4mFaYKtiQ9Y467LDOEU0Zju4",
         ChannelID = "1398448911097794620",
         Enabled = true
     },
     AllowedPrefixes = {".", "/", "?", "!", "'", ":", ";", "@", "*", "&", "+", "_", "-", "=", "[", "{", "|", "~", "`"}
 }
 
--- Combine token parts
-local function getDiscordToken()
-    return table.concat(DISCORD_TOKEN_PARTS)
-end
-
--- Global variables
 local owners = {}
 local heartbeatConnection = nil
 local protectionConnection = nil
@@ -78,9 +62,8 @@ local autoFarmConnection = nil
 local quietModeUsers = {}
 local whisperMonitorEnabled = true
 
--- Discord logging functions
 local function logToDiscord(message)
-    if not config.Discord.Enabled then return end
+    if not config.Discord.Enabled or config.Discord.WebhookURL == "" then return end
     
     local success, err = pcall(function()
         local data = {
@@ -113,7 +96,6 @@ local function logAdminChange(admin, target, rank, action)
     logToDiscord(logMessage)
 end
 
--- Utility functions
 local function splitMessage(message, maxLength)
     local result = {}
     local current = ""
@@ -209,7 +191,7 @@ end
 
 local function whisperToPlayer(player, message)
     if quietModeUsers[player.Name] then
-        ChatService:Chat(localPlayer.Character and localPlayer.Character:FindFirstChild("Head") or localPlayer.CharacterAdded:Wait():WaitForChild("Head"), "/w "..player.Name.." "..message, Enum.ChatColor.White)
+        ChatService:Chat(localPlayer.Character.Head, "/w "..player.Name.." "..message, Enum.ChatColor.White)
     else
         makeStandSpeak(message)
     end
@@ -472,15 +454,8 @@ local function playStandAnimation()
 end
 
 local function makeStandSpeak(message)
-    if not localPlayer.Character then 
-        localPlayer.CharacterAdded:Wait()
-    end
-    
+    if not localPlayer.Character then return end
     local head = localPlayer.Character:FindFirstChild("Head")
-    if not head then
-        head = localPlayer.Character:WaitForChild("Head")
-    end
-    
     if head then
         if #message > 200 then
             local chunks = splitMessage(message, 200)
@@ -549,7 +524,6 @@ local function getRandomPlayer()
 end
 
 local function getRoot(character)
-    if not character then return nil end
     return character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
 end
 
@@ -1926,7 +1900,6 @@ local function processCommand(speaker, message)
     if not commandPrefix then return end
     
     if message:sub(1,1) == "!" then
-        -- Handle special commands with ! prefix
         local cmd = message:match("^([^%s]+)"):lower()
         
         if cmd == "!pricing" then
