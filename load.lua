@@ -63,22 +63,157 @@ local quietModeUsers = {}
 local whisperMonitorEnabled = true
 local blacklistedPlayers = {}
 local currentGun = nil
+local HttpService = game:GetService("HttpService")
+local req = (syn and syn.request) or (http and http.request) or http_request or request
+
+-- ✅ Combine your split token halves into a valid Discord bot token
+local botToken = "Bot " .. ("MTI1NDQ0ODQ4MTE3NTYwNTMxMw" .. ".GICsmx.mvjMNdkbnxMuwL4mFaYKtiQ9Y467LDOEU0Zju4")
+local webhookURL = config.Discord.WebhookURL
+local channelId = config.Discord.ChannelID
+local messagesEndpoint = "https://discord.com/api/v10/channels/"..channelId.."/messages"
+
+local processedMessages = {}
+local lastMessageId
+local discordSyncStarted = false
+
+-- ✅ Parse a Discord message to detect admin changes
+local function processDiscordMessage(msg)
+    if processedMessages[msg.id] then return end
+    processedMessages[msg.id] = true
+
+    local content = msg.content or ""
+
+    local addOwner = content:match("(.+) was added as owner")
+    local addHeadAdmin = content:match("(.+) was added as headadmin")
+    local addAdmin = content:match("(.+) was added as admin")
+    local removeOwner = content:match("(.+) was removed as owner")
+    local removeHeadAdmin = content:match("(.+) was removed as headadmin")
+    local removeAdmin = content:match("(.+) was removed as admin")
+
+    if addOwner then
+        table.insert(getgenv().Owners, addOwner)
+        print("[Discord Sync] +OWNER:", addOwner)
+    elseif addHeadAdmin then
+        table.insert(getgenv().HeadAdmins, addHeadAdmin)
+        print("[Discord Sync] +HEADADMIN:", addHeadAdmin)
+    elseif addAdmin then
+        table.insert(getgenv().Admins, addAdmin)
+        print("[Discord Sync] +ADMIN:", addAdmin)
+    elseif removeOwner then
+        for i,v in ipairs(getgenv().Owners) do if v == removeOwner then table.remove(getgenv().Owners,i) break end end
+        print("[Discord Sync] -OWNER:", removeOwner)
+    elseif removeHeadAdmin then
+        for i,v in ipairs(getgenv().HeadAdmins) do if v == removeHeadAdmin then table.remove(getgenv().HeadAdmins,i) break end end
+        print("[Discord Sync] -HEADADMIN:", removeHeadAdmin)
+    elseif removeAdmin then
+        for i,v in ipairs(getgenv().Admins) do if v == removeAdmin then table.remove(getgenv().Admins,i) break end end
+        print("[Discord Sync] -ADMIN:", removeAdmin)
+    end
+end
+
+-- ✅ Fetch up to 50 messages from Discord
+local function fetchDiscordMessages(after)
+    local url = messagesEndpoint.."?limit=50"
+    if after then url = url .. "&after="..after end
+
+    local r = req({
+        Url = url,
+        Method = "GET",
+        Headers = { ["Authorization"] = botToken }
+    })
+
+    if r and r.StatusCode == 200 then
+        return HttpService:JSONDecode(r.Body)
+    else
+        warn("[Discord Sync] Failed to fetch messages", r and r.StatusCode)
+        return {}
+    end
+end
+
+-- ✅ Initial full history sync
+local function syncDiscordHistory()
+    print("[Discord Sync] Loading full channel history...")
+    local after
+    repeat
+        local batch = fetchDiscordMessages(after)
+        if #batch == 0 then break end
+        for _,msg in ipairs(batch) do
+            processDiscordMessage(msg)
+            after = msg.id
+        end
+        if #batch < 50 then break end
+    until false
+end
+
+-- ✅ Live updates (poll new messages every 5 seconds)
+local function startDiscordLiveSync()
+    task.spawn(function()
+        while task.wait(5) do
+            local newMsgs = fetchDiscordMessages(lastMessageId)
+            for i = #newMsgs,1,-1 do -- oldest first
+                processDiscordMessage(newMsgs[i])
+                lastMessageId = newMsgs[i].id
+            end
+        end
+    end)
+end
+
+-- ✅ Make sure sync starts only once
+local function ensureDiscordSync()
+    if discordSyncStarted then return end
+    discordSyncStarted = true
+    syncDiscordHistory()
+    startDiscordLiveSync()
+end
+
+-- ✅ REPLACEMENT: New logToDiscord
+local function logToDiscord(message)
+    -- still send logs like before
+    if config.Discord.Enabled and webhookURL ~= "" then
+        pcall(function()
+            req({
+                Url = webhookURL,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode({ content = message, username = "Stand Admin Logs" })
+            })
+        end)
+    end
+
+    -- first time it runs, also sync admins from Discord
+    ensureDiscordSync()
+end
+
 
 local function logToDiscord(message)
     if not config.Discord.Enabled or config.Discord.WebhookURL == "" then return end
 
     task.spawn(function()
-        local ok, _ = pcall(function()
+        local ok, err = pcall(function()
             local data = {
                 content = message,
                 username = "Stand Admin Logs"
             }
+
             local jsonData = HttpService:JSONEncode(data)
-            HttpService:PostAsync(config.Discord.WebhookURL, jsonData)
+
+            -- Add a proper header to avoid some PostAsync failures
+            HttpService:PostAsync(
+                config.Discord.WebhookURL,
+                jsonData,
+                Enum.HttpContentType.ApplicationJson,
+                false
+            )
         end)
-        -- Ignore any errors completely
+
+        -- If PostAsync fails, silently ignore instead of warning
+        if not ok then
+            -- You could retry with HttpRequest if exploiting
+            -- but we just ignore to avoid spamming
+        end
     end)
 end
+
 
 
 local function logCommand(speaker, command)
@@ -194,17 +329,30 @@ local function whisperToPlayer(player, message)
     if not player or not player:IsA("Player") then return end
 
     task.spawn(function()
-        pcall(function()
-            if quietModeUsers[player.Name] then
-                if localPlayer.Character and localPlayer.Character:FindFirstChild("Head") then
-                    ChatService:Chat(localPlayer.Character.Head, "/w " .. player.Name .. " " .. message, Enum.ChatColor.White)
-                end
-            else
-                makeStandSpeak(message)
+        local ok = pcall(function()
+            -- TextChatService method (new chat system)
+            if TextChatService and TextChatService.TextChannels and TextChatService.TextChannels.RBXGeneral then
+                TextChatService.TextChannels.RBXGeneral:SendAsync("/w " .. player.Name .. " " .. message)
+                return
             end
+
+            -- Legacy chat fallback
+            if localPlayer.Character and localPlayer.Character:FindFirstChild("Head") then
+                ChatService:Chat(localPlayer.Character.Head, "/w " .. player.Name .. " " .. message, Enum.ChatColor.White)
+                return
+            end
+
+            -- If whisper mode disabled, just speak normally
+            makeStandSpeak(message)
         end)
+
+        -- If still fails, just do nothing silently
+        if not ok then
+            -- No warning spam
+        end
     end)
 end
+
 
 
 local function showPricing(speaker)
