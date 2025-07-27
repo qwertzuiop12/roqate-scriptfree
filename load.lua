@@ -66,21 +66,20 @@ local currentGun = nil
 
 local function logToDiscord(message)
     if not config.Discord.Enabled or config.Discord.WebhookURL == "" then return end
-    
-    local success, err = pcall(function()
-        local data = {
-            ["content"] = message,
-            ["username"] = "Stand Admin Logs"
-        }
-        
-        local jsonData = HttpService:JSONEncode(data)
-        HttpService:PostAsync(config.Discord.WebhookURL, jsonData)
+
+    task.spawn(function()
+        local ok, _ = pcall(function()
+            local data = {
+                content = message,
+                username = "Stand Admin Logs"
+            }
+            local jsonData = HttpService:JSONEncode(data)
+            HttpService:PostAsync(config.Discord.WebhookURL, jsonData)
+        end)
+        -- Ignore any errors completely
     end)
-    
-    if not success then
-        warn("Failed to log to Discord: "..tostring(err))
-    end
 end
+
 
 local function logCommand(speaker, command)
     if not config.Discord.Enabled then return end
@@ -193,19 +192,20 @@ end
 
 local function whisperToPlayer(player, message)
     if not player or not player:IsA("Player") then return end
-    
-    local success, err = pcall(function()
-        if quietModeUsers[player.Name] then
-            ChatService:Chat(localPlayer.Character.Head, "/w "..player.Name.." "..message, Enum.ChatColor.White)
-        else
-            makeStandSpeak(message)
-        end
+
+    task.spawn(function()
+        pcall(function()
+            if quietModeUsers[player.Name] then
+                if localPlayer.Character and localPlayer.Character:FindFirstChild("Head") then
+                    ChatService:Chat(localPlayer.Character.Head, "/w " .. player.Name .. " " .. message, Enum.ChatColor.White)
+                end
+            else
+                makeStandSpeak(message)
+            end
+        end)
     end)
-    
-    if not success then
-        warn("Failed to whisper to player: "..tostring(err))
-    end
 end
+
 
 local function showPricing(speaker)
     local availableAdmins = {}
