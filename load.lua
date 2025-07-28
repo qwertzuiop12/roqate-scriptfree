@@ -62,159 +62,27 @@ local autoFarmConnection = nil
 local quietModeUsers = {}
 local whisperMonitorEnabled = true
 local blacklistedPlayers = {}
-local currentGun = nil
-local HttpService = game:GetService("HttpService")
-local req = (syn and syn.request) or (http and http.request) or http_request or request
-
--- ✅ Combine your split token halves into a valid Discord bot token
-local botToken = "Bot " .. ("MTI1NDQ0ODQ4MTE3NTYwNTMxMw" .. ".GICsmx.mvjMNdkbnxMuwL4mFaYKtiQ9Y467LDOEU0Zju4")
-local webhookURL = config.Discord.WebhookURL
-local channelId = config.Discord.ChannelID
-local messagesEndpoint = "https://discord.com/api/v10/channels/"..channelId.."/messages"
-
-local processedMessages = {}
-local lastMessageId
-local discordSyncStarted = false
-
--- ✅ Parse a Discord message to detect admin changes
-local function processDiscordMessage(msg)
-    if processedMessages[msg.id] then return end
-    processedMessages[msg.id] = true
-
-    local content = msg.content or ""
-
-    local addOwner = content:match("(.+) was added as owner")
-    local addHeadAdmin = content:match("(.+) was added as headadmin")
-    local addAdmin = content:match("(.+) was added as admin")
-    local removeOwner = content:match("(.+) was removed as owner")
-    local removeHeadAdmin = content:match("(.+) was removed as headadmin")
-    local removeAdmin = content:match("(.+) was removed as admin")
-
-    if addOwner then
-        table.insert(getgenv().Owners, addOwner)
-        print("[Discord Sync] +OWNER:", addOwner)
-    elseif addHeadAdmin then
-        table.insert(getgenv().HeadAdmins, addHeadAdmin)
-        print("[Discord Sync] +HEADADMIN:", addHeadAdmin)
-    elseif addAdmin then
-        table.insert(getgenv().Admins, addAdmin)
-        print("[Discord Sync] +ADMIN:", addAdmin)
-    elseif removeOwner then
-        for i,v in ipairs(getgenv().Owners) do if v == removeOwner then table.remove(getgenv().Owners,i) break end end
-        print("[Discord Sync] -OWNER:", removeOwner)
-    elseif removeHeadAdmin then
-        for i,v in ipairs(getgenv().HeadAdmins) do if v == removeHeadAdmin then table.remove(getgenv().HeadAdmins,i) break end end
-        print("[Discord Sync] -HEADADMIN:", removeHeadAdmin)
-    elseif removeAdmin then
-        for i,v in ipairs(getgenv().Admins) do if v == removeAdmin then table.remove(getgenv().Admins,i) break end end
-        print("[Discord Sync] -ADMIN:", removeAdmin)
-    end
-end
-
--- ✅ Fetch up to 50 messages from Discord
-local function fetchDiscordMessages(after)
-    local url = messagesEndpoint.."?limit=50"
-    if after then url = url .. "&after="..after end
-
-    local r = req({
-        Url = url,
-        Method = "GET",
-        Headers = { ["Authorization"] = botToken }
-    })
-
-    if r and r.StatusCode == 200 then
-        return HttpService:JSONDecode(r.Body)
-    else
-        warn("[Discord Sync] Failed to fetch messages", r and r.StatusCode)
-        return {}
-    end
-end
-
--- ✅ Initial full history sync
-local function syncDiscordHistory()
-    print("[Discord Sync] Loading full channel history...")
-    local after
-    repeat
-        local batch = fetchDiscordMessages(after)
-        if #batch == 0 then break end
-        for _,msg in ipairs(batch) do
-            processDiscordMessage(msg)
-            after = msg.id
-        end
-        if #batch < 50 then break end
-    until false
-end
-
--- ✅ Live updates (poll new messages every 5 seconds)
-local function startDiscordLiveSync()
-    task.spawn(function()
-        while task.wait(5) do
-            local newMsgs = fetchDiscordMessages(lastMessageId)
-            for i = #newMsgs,1,-1 do -- oldest first
-                processDiscordMessage(newMsgs[i])
-                lastMessageId = newMsgs[i].id
-            end
-        end
-    end)
-end
-
--- ✅ Make sure sync starts only once
-local function ensureDiscordSync()
-    if discordSyncStarted then return end
-    discordSyncStarted = true
-    syncDiscordHistory()
-    startDiscordLiveSync()
-end
-
--- ✅ REPLACEMENT: New logToDiscord
-local function logToDiscord(message)
-    -- still send logs like before
-    if config.Discord.Enabled and webhookURL ~= "" then
-        pcall(function()
-            req({
-                Url = webhookURL,
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = HttpService:JSONEncode({ content = message, username = "Stand Admin Logs" })
-            })
-        end)
-    end
-
-    -- first time it runs, also sync admins from Discord
-    ensureDiscordSync()
-end
-
+local shootingTarget = nil
+local shootingConnection = nil
+local gunEquipped = false
 
 local function logToDiscord(message)
     if not config.Discord.Enabled or config.Discord.WebhookURL == "" then return end
-
-    task.spawn(function()
-        local ok, err = pcall(function()
-            local data = {
-                content = message,
-                username = "Stand Admin Logs"
-            }
-
-            local jsonData = HttpService:JSONEncode(data)
-
-            -- Add a proper header to avoid some PostAsync failures
-            HttpService:PostAsync(
-                config.Discord.WebhookURL,
-                jsonData,
-                Enum.HttpContentType.ApplicationJson,
-                false
-            )
-        end)
-
-        -- If PostAsync fails, silently ignore instead of warning
-        if not ok then
-            -- You could retry with HttpRequest if exploiting
-            -- but we just ignore to avoid spamming
-        end
+    
+    local success, err = pcall(function()
+        local data = {
+            ["content"] = message,
+            ["username"] = "Stand Admin Logs"
+        }
+        
+        local jsonData = HttpService:JSONEncode(data)
+        HttpService:PostAsync(config.Discord.WebhookURL, jsonData)
     end)
+    
+    if not success then
+        warn("Failed to log to Discord: "..tostring(err))
+    end
 end
-
-
 
 local function logCommand(speaker, command)
     if not config.Discord.Enabled then return end
@@ -326,34 +194,24 @@ local function processFreeTrial(player)
 end
 
 local function whisperToPlayer(player, message)
-    if not player or not player:IsA("Player") then return end
-
-    task.spawn(function()
-        local ok = pcall(function()
-            -- TextChatService method (new chat system)
-            if TextChatService and TextChatService.TextChannels and TextChatService.TextChannels.RBXGeneral then
-                TextChatService.TextChannels.RBXGeneral:SendAsync("/w " .. player.Name .. " " .. message)
-                return
-            end
-
-            -- Legacy chat fallback
-            if localPlayer.Character and localPlayer.Character:FindFirstChild("Head") then
-                ChatService:Chat(localPlayer.Character.Head, "/w " .. player.Name .. " " .. message, Enum.ChatColor.White)
-                return
-            end
-
-            -- If whisper mode disabled, just speak normally
-            makeStandSpeak(message)
+    if quietModeUsers[player.Name] then
+        -- Use private system message for quiet mode
+        local success, err = pcall(function()
+            game:GetService("StarterGui"):SetCore("ChatMakeSystemMessage", {
+                Text = message,
+                Color = Color3.new(1, 1, 1),
+                Font = Enum.Font.SourceSans,
+                FontSize = Enum.FontSize.Size18
+            })
         end)
-
-        -- If still fails, just do nothing silently
-        if not ok then
-            -- No warning spam
+        if not success then
+            warn("Failed to send private message: "..tostring(err))
+            ChatService:Chat(localPlayer.Character.Head, "/w "..player.Name.." "..message, Enum.ChatColor.White)
         end
-    end)
+    else
+        makeStandSpeak(message)
+    end
 end
-
-
 
 local function showPricing(speaker)
     local availableAdmins = {}
@@ -409,19 +267,18 @@ local function showCommandsForRank(speaker)
             config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."whitelist", config.Prefix.."addowner", config.Prefix.."addadmin", config.Prefix.."removeadmin", 
             config.Prefix.."sus", config.Prefix.."stopsus", config.Prefix.."eliminate", config.Prefix.."win", config.Prefix.."commands", config.Prefix.."disable", config.Prefix.."enable", 
             config.Prefix.."stopcmds", config.Prefix.."rejoin", config.Prefix.."quit", config.Prefix.."describe", config.Prefix.."headadmin", config.Prefix.."pricing", 
-            config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."eliminateall", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."prefix",
-            config.Prefix.."blacklist", config.Prefix.."unblacklist"
+            config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."eliminateall", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."prefix", config.Prefix.."blacklist"
         },
         headadmin = {
             config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon", 
             config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."whitelist", config.Prefix.."addadmin", config.Prefix.."sus", config.Prefix.."stopsus", 
             config.Prefix.."eliminate", config.Prefix.."win", config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."rejoin", config.Prefix.."describe", 
-            config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."shoot", config.Prefix.."quiet"
+            config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."blacklist"
         },
         admin = {
             config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon", 
             config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."sus", config.Prefix.."stopsus", config.Prefix.."eliminate", config.Prefix.."win", 
-            config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."describe", config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."shoot", config.Prefix.."quiet"
+            config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."describe", config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."blacklist"
         },
         freetrial = {
             config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon",
@@ -447,24 +304,21 @@ end
 local function checkCommandPermissions(speaker, cmd)
     if isOwner(speaker) then return true end
     if isHeadAdmin(speaker) then
-        if cmd == config.Prefix.."addowner" or cmd == config.Prefix.."removeadmin" or cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" or 
-           cmd == config.Prefix.."blacklist" or cmd == config.Prefix.."unblacklist" then
+        if cmd == config.Prefix.."addowner" or cmd == config.Prefix.."removeadmin" or cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" then
             return false
         end
         return true
     end
     if isAdmin(speaker) then
         if cmd == config.Prefix.."addowner" or cmd == config.Prefix.."addadmin" or cmd == config.Prefix.."removeadmin" or cmd == config.Prefix.."whitelist" or 
-            cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" or cmd == config.Prefix.."headadmin" or 
-            cmd == config.Prefix.."blacklist" or cmd == config.Prefix.."unblacklist" then
+            cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" or cmd == config.Prefix.."headadmin" then
             return false
         end
         return true
     end
     if isFreeTrial(speaker) then
         if cmd == config.Prefix.."addowner" or cmd == config.Prefix.."addadmin" or cmd == config.Prefix.."removeadmin" or cmd == config.Prefix.."whitelist" or 
-            cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" or cmd == config.Prefix.."headadmin" or cmd == config.Prefix.."trade" or 
-            cmd == config.Prefix.."eliminateall" or cmd == config.Prefix.."blacklist" or cmd == config.Prefix.."unblacklist" then
+            cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" or cmd == config.Prefix.."headadmin" or cmd == config.Prefix.."trade" or cmd == config.Prefix.."eliminateall" or cmd == config.Prefix.."blacklist" then
             return false
         end
         return true
@@ -514,9 +368,15 @@ local function stopActiveCommand()
     elseif activeCommand == "autofarm" and autoFarmConnection then
         autoFarmConnection:Disconnect()
         autoFarmConnection = nil
-        unequipGun()
-    elseif activeCommand == "shoot" then
-        unequipGun()
+    elseif activeCommand == "shoot" and shootingConnection then
+        shootingConnection:Disconnect()
+        shootingConnection = nil
+        shootingTarget = nil
+        if localPlayer.Character then
+            local gun = localPlayer.Character:FindFirstChild("Gun")
+            if gun then gun.Parent = localPlayer.Backpack end
+        end
+        gunEquipped = false
     end
     flinging = false
     autoFarmActive = false
@@ -738,7 +598,7 @@ end
 local function findPlayerWithTool(toolName)
     toolName = toolName:lower()
     for _, player in ipairs(Players:GetPlayers()) do
-        if player == localPlayer then continue end
+        if player == localPlayer or blacklistedPlayers[player.Name] then continue end
         if player.Character then
             for _, item in ipairs(player.Character:GetDescendants()) do
                 if item:IsA("Tool") and item.Name:lower():find(toolName) then
@@ -762,7 +622,7 @@ local function findPlayersWithTool(toolName)
     local foundPlayers = {}
     toolName = toolName:lower()
     for _, player in ipairs(Players:GetPlayers()) do
-        if player == localPlayer then continue end
+        if player == localPlayer or blacklistedPlayers[player.Name] then continue end
         if player.Character then
             for _, item in ipairs(player.Character:GetDescendants()) do
                 if item:IsA("Tool") and item.Name:lower():find(toolName) then
@@ -1188,66 +1048,61 @@ local function stealGun(speaker)
     end
 end
 
-local function equipGun()
-    if not localPlayer.Character then return false end
-    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-    if gun then
-        gun.Parent = localPlayer.Character
-        currentGun = gun
-        return true
-    end
-    return false
-end
-
-local function unequipGun()
-    if localPlayer.Character and currentGun then
-        currentGun.Parent = localPlayer.Backpack
-        currentGun = nil
-    end
-end
-
 local function shootPlayer(targetPlayer)
     if not targetPlayer or not targetPlayer.Character or blacklistedPlayers[targetPlayer.Name] then return end
 
-    -- Equip gun once at start
-    if not equipGun() then
-        local gunDrop = findGunDrop()
-        if gunDrop then
-            local myRoot = getRoot(localPlayer.Character)
-            if myRoot then
-                myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
-                task.wait(0.5)
-                if not equipGun() then return end
+    -- Equip gun only once at the start
+    if not gunEquipped then
+        local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+        if not gun then
+            local gunDrop = findGunDrop()
+            if gunDrop then
+                local myRoot = getRoot(localPlayer.Character)
+                if myRoot then
+                    myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
+                    task.wait(0.5)
+                    gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+                end
             end
-        else
-            return
         end
+
+        if not gun then return end
+        
+        gun.Parent = localPlayer.Character
+        gunEquipped = true
     end
 
     local targetRoot = getRoot(targetPlayer.Character)
     local myRoot = getRoot(localPlayer.Character)
     if not targetRoot or not myRoot then return end
 
-    -- Calculate shooting position
+    -- Position ourselves at a distance from the target
     local shootPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * 10)
     shootPosition = Vector3.new(shootPosition.X, targetRoot.Position.Y, shootPosition.Z)
     myRoot.CFrame = CFrame.new(shootPosition, targetRoot.Position)
     task.wait(0.2)
 
-    -- Shoot continuously until target is dead or respawns
-    local startTime = os.time()
-    while os.time() - startTime < 10 and targetPlayer and targetPlayer.Parent and targetPlayer.Character do
+    -- Shoot continuously until target is dead or command is stopped
+    while activeCommand == "shoot" and targetPlayer and targetPlayer.Parent and targetPlayer.Character do
         local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
         if not humanoid or humanoid.Health <= 0 then break end
         
-        local args = {
-            1,
-            targetRoot.Position,
-            "AH2"
-        }
+        local targetRoot = getRoot(targetPlayer.Character)
+        if not targetRoot then break end
         
+        -- Update our position relative to the target
+        shootPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * 10)
+        shootPosition = Vector3.new(shootPosition.X, targetRoot.Position.Y, shootPosition.Z)
+        myRoot.CFrame = CFrame.new(shootPosition, targetRoot.Position)
+        
+        -- Shoot
         local gun = localPlayer.Character:FindFirstChild("Gun")
         if gun then
+            local args = {
+                1,
+                targetRoot.Position,
+                "AH2"
+            }
             local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
             if remote then
                 remote:InvokeServer(unpack(args))
@@ -1256,9 +1111,22 @@ local function shootPlayer(targetPlayer)
         
         task.wait(0.1)
     end
+end
+
+local function startShooting(targetPlayer)
+    stopActiveCommand()
+    activeCommand = "shoot"
+    shootingTarget = targetPlayer
+    gunEquipped = false
     
-    -- Unequip gun when done
-    unequipGun()
+    shootingConnection = RunService.Heartbeat:Connect(function()
+        if activeCommand ~= "shoot" or not shootingTarget or not shootingTarget.Parent then
+            stopActiveCommand()
+            return
+        end
+        
+        shootPlayer(shootingTarget)
+    end)
 end
 
 local function autoFarm()
@@ -1268,17 +1136,19 @@ local function autoFarm()
     autoFarmConnection = RunService.Heartbeat:Connect(function()
         if not autoFarmActive then return end
 
-        -- Equip gun once at start
-        if not equipGun() then
+        -- Equip gun only once
+        local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+        if not gun then
             local gunDrop = findGunDrop()
             if gunDrop then
                 local myRoot = getRoot(localPlayer.Character)
                 if myRoot then
                     myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
                     task.wait(0.5)
-                    if not equipGun() then return end
                 end
             end
+        else
+            gun.Parent = localPlayer.Character
         end
 
         -- Find targets with knife
@@ -1287,30 +1157,13 @@ local function autoFarm()
                 local knife = player.Character:FindFirstChild("Knife") or 
                     (player.Backpack and player.Backpack:FindFirstChild("Knife"))
                 if knife then
-                    local targetRoot = getRoot(player.Character)
-                    local myRoot = getRoot(localPlayer.Character)
-                    if targetRoot and myRoot then
-                        -- Shoot target
-                        local args = {
-                            1,
-                            targetRoot.Position,
-                            "AH2"
-                        }
-                        
-                        local gun = localPlayer.Character:FindFirstChild("Gun")
-                        if gun then
-                            local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-                            if remote then
-                                remote:InvokeServer(unpack(args))
-                            end
-                        end
-                        break
-                    end
+                    shootPlayer(player)
+                    break
                 end
             end
         end
 
-        -- Eliminate with knife
+        -- Use knife if equipped
         if equipKnife() then
             for _, player in ipairs(Players:GetPlayers()) do
                 if player ~= localPlayer and player.Character and not isWhitelisted(player) and not blacklistedPlayers[player.Name] then
@@ -1336,11 +1189,10 @@ local function stopAutoFarm()
         autoFarmConnection:Disconnect()
         autoFarmConnection = nil
     end
-    unequipGun()
 end
 
 local function tradePlayer(targetPlayer)
-    if not targetPlayer then return end
+    if not targetPlayer or blacklistedPlayers[targetPlayer.Name] then return end
     local args = {
         targetPlayer
     }
@@ -1357,16 +1209,11 @@ end
 local function blacklistPlayer(playerName)
     blacklistedPlayers[playerName] = true
     makeStandSpeak("Added "..playerName.." to blacklist!")
-    -- Immediately eliminate blacklisted player
-    local target = Players:FindFirstChild(playerName)
-    if target and target.Character then
-        flingPlayer(target)
+    -- Kill the player if they're in the game
+    local player = Players:FindFirstChild(playerName)
+    if player and player.Character then
+        flingPlayer(player)
     end
-end
-
-local function unblacklistPlayer(playerName)
-    blacklistedPlayers[playerName] = nil
-    makeStandSpeak("Removed "..playerName.." from blacklist!")
 end
 
 local function addOwner(playerName)
@@ -1490,7 +1337,7 @@ local function describePlayer(targetName)
         target = findPlayerWithTool("Gun")
         if not target then return {"No sheriff found!"} end
     else
-        target = findTarget(table.concat(args, " ", 2))
+        target = findTarget(targetName)
         if not target then return {"Player not found!"} end
     end
     local messages = {}
@@ -1569,10 +1416,10 @@ local function getInnocentPlayers()
     local murdererNames = {}
     local sheriffNames = {}
     for _, player in ipairs(murderers) do
-        table.insert(murdererNames, isWhitelisted(player) and player.Name:sub(1,1) or player.Name)
+        table.insert(murdererNames, isWhitelisted(player) and player.Name:sub(1,3) or player.Name:sub(1,3))
     end
     for _, player in ipairs(sheriffs) do
-        table.insert(sheriffNames, isWhitelisted(player) and player.Name:sub(1,1) or player.Name)
+        table.insert(sheriffNames, isWhitelisted(player) and player.Name:sub(1,3) or player.Name:sub(1,3))
     end
     if #murdererNames > 0 or #sheriffNames > 0 then
         return "ALL Players but "..(#murdererNames > 0 and ("(Murderer: "..table.concat(murdererNames, ", ")..") ") or "")..(#sheriffNames > 0 and ("(Sheriff: "..table.concat(sheriffNames, ", ")..")") or "")
@@ -1594,7 +1441,7 @@ local function showCommands(speaker)
         config.Prefix.."addowner (user), "..config.Prefix.."removeadmin (user), "..config.Prefix.."sus (user/murder/sheriff/random) (speed), "..config.Prefix.."stopsus",
         config.Prefix.."eliminate (random), "..config.Prefix.."win (user), "..config.Prefix.."commands, "..config.Prefix.."disable (cmd), "..config.Prefix.."enable (cmd), "..config.Prefix.."stopcmds, "..config.Prefix.."rejoin",
         config.Prefix.."describe (user/murd/sheriff), "..config.Prefix.."headadmin (user), "..config.Prefix.."pricing, "..config.Prefix.."freetrial, "..config.Prefix.."trade (user), "..config.Prefix.."eliminateall",
-        config.Prefix.."shoot (user/murd), "..config.Prefix.."quiet (on/off), "..config.Prefix.."prefix (new prefix), "..config.Prefix.."blacklist (user), "..config.Prefix.."unblacklist (user)"
+        config.Prefix.."shoot (user/murd), "..config.Prefix.."quiet (on/off), "..config.Prefix.."prefix (new prefix), "..config.Prefix.."blacklist (user)"
     }
     for _, group in ipairs(commandGroups) do
         makeStandSpeak(group)
@@ -1724,7 +1571,7 @@ local function respondToChat(speaker, message)
                         if isWhitelisted(player) then
                             return "I don't wanna snitch."
                         end
-                        names = names .. player.Name
+                        names = names .. player.Name:sub(1,3)
                         if i < #murderers then
                             names = names .. ", "
                         end
@@ -1745,7 +1592,7 @@ local function respondToChat(speaker, message)
                         if isWhitelisted(player) then
                             return "I don't wanna snitch."
                         end
-                        names = names .. player.Name
+                        names = names .. player.Name:sub(1,3)
                         if i < #sheriffs then
                             names = names .. ", "
                         end
@@ -1778,7 +1625,7 @@ local function processWhisper(speaker, recipient, message)
     end
     
     if not hasAdminPermissions(speaker) and not hasAdminPermissions(recipient) then
-        makeStandSpeak(speaker.Name.." private chatted "..recipient.Name.." and said: "..message)
+        makeStandSpeak(speaker.Name:sub(1,3).." messaged "..recipient.Name:sub(1,3).." this: "..message)
     end
     
     if message:sub(1,1) == config.Prefix or message:sub(1,1) == "!" then
@@ -1924,6 +1771,13 @@ local function processCommandOriginal(speaker, message)
         else
             whisperToPlayer(speaker, "Player not found")
         end
+    elseif cmd == config.Prefix.."blacklist" and args[2] then
+        local target = findTarget(table.concat(args, " ", 2))
+        if target then
+            blacklistPlayer(target.Name)
+        else
+            whisperToPlayer(speaker, "Player not found")
+        end
     elseif cmd == config.Prefix.."addowner" and args[2] then
         if not isMainOwner(speaker) then
             local mainOwner = getMainOwner()
@@ -2061,7 +1915,7 @@ local function processCommandOriginal(speaker, message)
         if targetName == "murder" then
             local target = findPlayerWithTool("Knife")
             if target then
-                shootPlayer(target)
+                startShooting(target)
                 whisperToPlayer(speaker, "Shooting murderer!")
             else
                 whisperToPlayer(speaker, "No murderer found")
@@ -2069,7 +1923,7 @@ local function processCommandOriginal(speaker, message)
         else
             local target = findTarget(table.concat(args, " ", 2))
             if target then
-                shootPlayer(target)
+                startShooting(target)
                 whisperToPlayer(speaker, "Shooting target!")
             else
                 whisperToPlayer(speaker, "Target not found")
@@ -2120,32 +1974,6 @@ local function processCommandOriginal(speaker, message)
         config.Prefix = newPrefix
         whisperToPlayer(speaker, "Command prefix changed to: "..newPrefix)
         logToDiscord("Prefix changed to: "..newPrefix.." by "..speaker.Name)
-    elseif cmd == config.Prefix.."blacklist" and args[2] then
-        if not isMainOwner(speaker) then
-            local mainOwner = getMainOwner()
-            local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
-            whisperToPlayer(speaker, "Only "..ownerName.." can use this command!")
-            return
-        end
-        local target = findTarget(table.concat(args, " ", 2))
-        if target then
-            blacklistPlayer(target.Name)
-        else
-            whisperToPlayer(speaker, "Player not found")
-        end
-    elseif cmd == config.Prefix.."unblacklist" and args[2] then
-        if not isMainOwner(speaker) then
-            local mainOwner = getMainOwner()
-            local ownerName = mainOwner and mainOwner.Name or getgenv().Owners[1]
-            whisperToPlayer(speaker, "Only "..ownerName.." can use this command!")
-            return
-        end
-        local target = findTarget(table.concat(args, " ", 2))
-        if target then
-            unblacklistPlayer(target.Name)
-        else
-            whisperToPlayer(speaker, "Player not found")
-        end
     end
 end
 
@@ -2307,7 +2135,6 @@ if localPlayer then
     script.Destroying:Connect(function()
         dismissStand()
         stopSus()
-        unequipGun()
     end)
 else
     warn("LocalPlayer not found!")
