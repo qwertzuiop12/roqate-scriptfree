@@ -1,3 +1,4 @@
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -61,10 +62,6 @@ local autoFarmActive = false
 local autoFarmConnection = nil
 local quietModeUsers = {}
 local whisperMonitorEnabled = true
-local blacklistedPlayers = {}
-local shootingTarget = nil
-local shootingConnection = nil
-local gunEquipped = false
 
 local function logToDiscord(message)
     if not config.Discord.Enabled or config.Discord.WebhookURL == "" then return end
@@ -195,19 +192,7 @@ end
 
 local function whisperToPlayer(player, message)
     if quietModeUsers[player.Name] then
-        -- Use private system message for quiet mode
-        local success, err = pcall(function()
-            game:GetService("StarterGui"):SetCore("ChatMakeSystemMessage", {
-                Text = message,
-                Color = Color3.new(1, 1, 1),
-                Font = Enum.Font.SourceSans,
-                FontSize = Enum.FontSize.Size18
-            })
-        end)
-        if not success then
-            warn("Failed to send private message: "..tostring(err))
-            ChatService:Chat(localPlayer.Character.Head, "/w "..player.Name.." "..message, Enum.ChatColor.White)
-        end
+        ChatService:Chat(localPlayer.Character.Head, "/w "..player.Name.." "..message, Enum.ChatColor.White)
     else
         makeStandSpeak(message)
     end
@@ -267,18 +252,18 @@ local function showCommandsForRank(speaker)
             config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."whitelist", config.Prefix.."addowner", config.Prefix.."addadmin", config.Prefix.."removeadmin", 
             config.Prefix.."sus", config.Prefix.."stopsus", config.Prefix.."eliminate", config.Prefix.."win", config.Prefix.."commands", config.Prefix.."disable", config.Prefix.."enable", 
             config.Prefix.."stopcmds", config.Prefix.."rejoin", config.Prefix.."quit", config.Prefix.."describe", config.Prefix.."headadmin", config.Prefix.."pricing", 
-            config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."eliminateall", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."prefix", config.Prefix.."blacklist"
+            config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."eliminateall", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."prefix"
         },
         headadmin = {
             config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon", 
             config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."whitelist", config.Prefix.."addadmin", config.Prefix.."sus", config.Prefix.."stopsus", 
             config.Prefix.."eliminate", config.Prefix.."win", config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."rejoin", config.Prefix.."describe", 
-            config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."blacklist"
+            config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."shoot", config.Prefix.."quiet"
         },
         admin = {
             config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon", 
             config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."sus", config.Prefix.."stopsus", config.Prefix.."eliminate", config.Prefix.."win", 
-            config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."describe", config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."blacklist"
+            config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."describe", config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."shoot", config.Prefix.."quiet"
         },
         freetrial = {
             config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon",
@@ -318,7 +303,7 @@ local function checkCommandPermissions(speaker, cmd)
     end
     if isFreeTrial(speaker) then
         if cmd == config.Prefix.."addowner" or cmd == config.Prefix.."addadmin" or cmd == config.Prefix.."removeadmin" or cmd == config.Prefix.."whitelist" or 
-            cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" or cmd == config.Prefix.."headadmin" or cmd == config.Prefix.."trade" or cmd == config.Prefix.."eliminateall" or cmd == config.Prefix.."blacklist" then
+            cmd == config.Prefix.."disable" or cmd == config.Prefix.."enable" or cmd == config.Prefix.."quit" or cmd == config.Prefix.."headadmin" or cmd == config.Prefix.."trade" or cmd == config.Prefix.."eliminateall" then
             return false
         end
         return true
@@ -368,15 +353,6 @@ local function stopActiveCommand()
     elseif activeCommand == "autofarm" and autoFarmConnection then
         autoFarmConnection:Disconnect()
         autoFarmConnection = nil
-    elseif activeCommand == "shoot" and shootingConnection then
-        shootingConnection:Disconnect()
-        shootingConnection = nil
-        shootingTarget = nil
-        if localPlayer.Character then
-            local gun = localPlayer.Character:FindFirstChild("Gun")
-            if gun then gun.Parent = localPlayer.Backpack end
-        end
-        gunEquipped = false
     end
     flinging = false
     autoFarmActive = false
@@ -538,7 +514,7 @@ end
 local function getRandomPlayer()
     local players = {}
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= localPlayer and not blacklistedPlayers[player.Name] then
+        if player ~= localPlayer then
             table.insert(players, player)
         end
     end
@@ -598,7 +574,7 @@ end
 local function findPlayerWithTool(toolName)
     toolName = toolName:lower()
     for _, player in ipairs(Players:GetPlayers()) do
-        if player == localPlayer or blacklistedPlayers[player.Name] then continue end
+        if player == localPlayer then continue end
         if player.Character then
             for _, item in ipairs(player.Character:GetDescendants()) do
                 if item:IsA("Tool") and item.Name:lower():find(toolName) then
@@ -622,7 +598,7 @@ local function findPlayersWithTool(toolName)
     local foundPlayers = {}
     toolName = toolName:lower()
     for _, player in ipairs(Players:GetPlayers()) do
-        if player == localPlayer or blacklistedPlayers[player.Name] then continue end
+        if player == localPlayer then continue end
         if player.Character then
             for _, item in ipairs(player.Character:GetDescendants()) do
                 if item:IsA("Tool") and item.Name:lower():find(toolName) then
@@ -659,7 +635,7 @@ local function startProtection()
                 local ownerRoot = getRoot(owner.Character)
                 if ownerRoot then
                     for _, player in ipairs(Players:GetPlayers()) do
-                        if player ~= localPlayer and player.Character and not blacklistedPlayers[player.Name] then
+                        if player ~= localPlayer and player.Character then
                             local targetRoot = getRoot(player.Character)
                             if targetRoot and (targetRoot.Position - ownerRoot.Position).Magnitude < PROTECTION_RADIUS then
                                 flingPlayer(player)
@@ -933,7 +909,7 @@ local function eliminatePlayers()
     if not equipKnife() then return end
     while activeCommand == "eliminate" do
         for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= localPlayer and player.Character and not blacklistedPlayers[player.Name] then
+            if player ~= localPlayer and player.Character then
                 local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
                 if humanoid and humanoid.Health > 0 then
                     local root = getRoot(player.Character)
@@ -965,7 +941,7 @@ local function eliminateAllPlayers()
     if not myRoot then return end
     
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= localPlayer and player.Character and not blacklistedPlayers[player.Name] then
+        if player ~= localPlayer and player.Character then
             local targetRoot = getRoot(player.Character)
             if targetRoot then
                 targetRoot.Anchored = true
@@ -1001,7 +977,7 @@ local function winGame(targetPlayer)
     stopActiveCommand()
     if not targetPlayer or targetPlayer == localPlayer then return end
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= localPlayer and player ~= targetPlayer and not blacklistedPlayers[player.Name] then
+        if player ~= localPlayer and player ~= targetPlayer then
             flingPlayer(player)
         end
     end
@@ -1049,84 +1025,48 @@ local function stealGun(speaker)
 end
 
 local function shootPlayer(targetPlayer)
-    if not targetPlayer or not targetPlayer.Character or blacklistedPlayers[targetPlayer.Name] then return end
+    if not targetPlayer or not targetPlayer.Character then return end
 
-    -- Equip gun only once at the start
-    if not gunEquipped then
-        local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-        if not gun then
-            local gunDrop = findGunDrop()
-            if gunDrop then
-                local myRoot = getRoot(localPlayer.Character)
-                if myRoot then
-                    myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
-                    task.wait(0.5)
-                    gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-                end
+    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+    if not gun then
+        local gunDrop = findGunDrop()
+        if gunDrop then
+            local myRoot = getRoot(localPlayer.Character)
+            if myRoot then
+                myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
+                task.wait(0.5)
+                gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
             end
         end
-
-        if not gun then return end
-        
-        gun.Parent = localPlayer.Character
-        gunEquipped = true
     end
+
+    if not gun then return end
 
     local targetRoot = getRoot(targetPlayer.Character)
     local myRoot = getRoot(localPlayer.Character)
     if not targetRoot or not myRoot then return end
 
-    -- Position ourselves at a distance from the target
     local shootPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * 10)
     shootPosition = Vector3.new(shootPosition.X, targetRoot.Position.Y, shootPosition.Z)
     myRoot.CFrame = CFrame.new(shootPosition, targetRoot.Position)
     task.wait(0.2)
 
-    -- Shoot continuously until target is dead or command is stopped
-    while activeCommand == "shoot" and targetPlayer and targetPlayer.Parent and targetPlayer.Character do
-        local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then break end
-        
-        local targetRoot = getRoot(targetPlayer.Character)
-        if not targetRoot then break end
-        
-        -- Update our position relative to the target
-        shootPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * 10)
-        shootPosition = Vector3.new(shootPosition.X, targetRoot.Position.Y, shootPosition.Z)
-        myRoot.CFrame = CFrame.new(shootPosition, targetRoot.Position)
-        
-        -- Shoot
-        local gun = localPlayer.Character:FindFirstChild("Gun")
-        if gun then
-            local args = {
-                1,
-                targetRoot.Position,
-                "AH2"
-            }
-            local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-            if remote then
-                remote:InvokeServer(unpack(args))
-            end
-        end
-        
-        task.wait(0.1)
-    end
-end
+    gun.Parent = localPlayer.Character
+    task.wait(0.1)
 
-local function startShooting(targetPlayer)
-    stopActiveCommand()
-    activeCommand = "shoot"
-    shootingTarget = targetPlayer
-    gunEquipped = false
+    local args = {
+        1,
+        targetRoot.Position,
+        "AH2"
+    }
+    local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+    if remote then
+        remote:InvokeServer(unpack(args))
+    end
+
+    task.wait(0.2)
     
-    shootingConnection = RunService.Heartbeat:Connect(function()
-        if activeCommand ~= "shoot" or not shootingTarget or not shootingTarget.Parent then
-            stopActiveCommand()
-            return
-        end
-        
-        shootPlayer(shootingTarget)
-    end)
+    if gun then gun.Parent = localPlayer.Backpack end
 end
 
 local function autoFarm()
@@ -1136,7 +1076,6 @@ local function autoFarm()
     autoFarmConnection = RunService.Heartbeat:Connect(function()
         if not autoFarmActive then return end
 
-        -- Equip gun only once
         local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
         if not gun then
             local gunDrop = findGunDrop()
@@ -1148,25 +1087,21 @@ local function autoFarm()
                 end
             end
         else
-            gun.Parent = localPlayer.Character
-        end
-
-        -- Find targets with knife
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= localPlayer and player.Character and not isWhitelisted(player) and not blacklistedPlayers[player.Name] then
-                local knife = player.Character:FindFirstChild("Knife") or 
-                    (player.Backpack and player.Backpack:FindFirstChild("Knife"))
-                if knife then
-                    shootPlayer(player)
-                    break
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= localPlayer and player.Character and not isWhitelisted(player) then
+                    local knife = player.Character:FindFirstChild("Knife") or 
+                        (player.Backpack and player.Backpack:FindFirstChild("Knife"))
+                    if knife then
+                        shootPlayer(player)
+                        break
+                    end
                 end
             end
         end
 
-        -- Use knife if equipped
         if equipKnife() then
             for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= localPlayer and player.Character and not isWhitelisted(player) and not blacklistedPlayers[player.Name] then
+                if player ~= localPlayer and player.Character and not isWhitelisted(player) then
                     local targetRoot = getRoot(player.Character)
                     local myRoot = getRoot(localPlayer.Character)
                     if targetRoot and myRoot then
@@ -1192,7 +1127,7 @@ local function stopAutoFarm()
 end
 
 local function tradePlayer(targetPlayer)
-    if not targetPlayer or blacklistedPlayers[targetPlayer.Name] then return end
+    if not targetPlayer then return end
     local args = {
         targetPlayer
     }
@@ -1204,16 +1139,6 @@ end
 local function whitelistPlayer(playerName)
     table.insert(getgenv().Configuration.whitelist, playerName)
     makeStandSpeak("Added "..playerName.." to whitelist!")
-end
-
-local function blacklistPlayer(playerName)
-    blacklistedPlayers[playerName] = true
-    makeStandSpeak("Added "..playerName.." to blacklist!")
-    -- Kill the player if they're in the game
-    local player = Players:FindFirstChild(playerName)
-    if player and player.Character then
-        flingPlayer(player)
-    end
 end
 
 local function addOwner(playerName)
@@ -1416,10 +1341,10 @@ local function getInnocentPlayers()
     local murdererNames = {}
     local sheriffNames = {}
     for _, player in ipairs(murderers) do
-        table.insert(murdererNames, isWhitelisted(player) and player.Name:sub(1,3) or player.Name:sub(1,3))
+        table.insert(murdererNames, isWhitelisted(player) and player.Name:sub(1,1) or player.Name)
     end
     for _, player in ipairs(sheriffs) do
-        table.insert(sheriffNames, isWhitelisted(player) and player.Name:sub(1,3) or player.Name:sub(1,3))
+        table.insert(sheriffNames, isWhitelisted(player) and player.Name:sub(1,1) or player.Name)
     end
     if #murdererNames > 0 or #sheriffNames > 0 then
         return "ALL Players but "..(#murdererNames > 0 and ("(Murderer: "..table.concat(murdererNames, ", ")..") ") or "")..(#sheriffNames > 0 and ("(Sheriff: "..table.concat(sheriffNames, ", ")..")") or "")
@@ -1441,7 +1366,7 @@ local function showCommands(speaker)
         config.Prefix.."addowner (user), "..config.Prefix.."removeadmin (user), "..config.Prefix.."sus (user/murder/sheriff/random) (speed), "..config.Prefix.."stopsus",
         config.Prefix.."eliminate (random), "..config.Prefix.."win (user), "..config.Prefix.."commands, "..config.Prefix.."disable (cmd), "..config.Prefix.."enable (cmd), "..config.Prefix.."stopcmds, "..config.Prefix.."rejoin",
         config.Prefix.."describe (user/murd/sheriff), "..config.Prefix.."headadmin (user), "..config.Prefix.."pricing, "..config.Prefix.."freetrial, "..config.Prefix.."trade (user), "..config.Prefix.."eliminateall",
-        config.Prefix.."shoot (user/murd), "..config.Prefix.."quiet (on/off), "..config.Prefix.."prefix (new prefix), "..config.Prefix.."blacklist (user)"
+        config.Prefix.."shoot (user/murd), "..config.Prefix.."quiet (on/off), "..config.Prefix.."prefix (new prefix)"
     }
     for _, group in ipairs(commandGroups) do
         makeStandSpeak(group)
@@ -1571,7 +1496,7 @@ local function respondToChat(speaker, message)
                         if isWhitelisted(player) then
                             return "I don't wanna snitch."
                         end
-                        names = names .. player.Name:sub(1,3)
+                        names = names .. player.Name
                         if i < #murderers then
                             names = names .. ", "
                         end
@@ -1592,7 +1517,7 @@ local function respondToChat(speaker, message)
                         if isWhitelisted(player) then
                             return "I don't wanna snitch."
                         end
-                        names = names .. player.Name:sub(1,3)
+                        names = names .. player.Name
                         if i < #sheriffs then
                             names = names .. ", "
                         end
@@ -1625,7 +1550,7 @@ local function processWhisper(speaker, recipient, message)
     end
     
     if not hasAdminPermissions(speaker) and not hasAdminPermissions(recipient) then
-        makeStandSpeak(speaker.Name:sub(1,3).." messaged "..recipient.Name:sub(1,3).." this: "..message)
+        makeStandSpeak(speaker.Name.." private chatted "..recipient.Name.." and said: "..message)
     end
     
     if message:sub(1,1) == config.Prefix or message:sub(1,1) == "!" then
@@ -1724,7 +1649,7 @@ local function processCommandOriginal(speaker, message)
         local targetName = args[2]:lower()
         if targetName == "all" then
             for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= localPlayer and not blacklistedPlayers[player.Name] then
+                if player ~= localPlayer then
                     spawn(function() flingPlayer(player) end)
                 end
             end
@@ -1768,13 +1693,6 @@ local function processCommandOriginal(speaker, message)
         local target = findTarget(table.concat(args, " ", 2))
         if target then
             whitelistPlayer(target.Name)
-        else
-            whisperToPlayer(speaker, "Player not found")
-        end
-    elseif cmd == config.Prefix.."blacklist" and args[2] then
-        local target = findTarget(table.concat(args, " ", 2))
-        if target then
-            blacklistPlayer(target.Name)
         else
             whisperToPlayer(speaker, "Player not found")
         end
@@ -1915,7 +1833,7 @@ local function processCommandOriginal(speaker, message)
         if targetName == "murder" then
             local target = findPlayerWithTool("Knife")
             if target then
-                startShooting(target)
+                shootPlayer(target)
                 whisperToPlayer(speaker, "Shooting murderer!")
             else
                 whisperToPlayer(speaker, "No murderer found")
@@ -1923,7 +1841,7 @@ local function processCommandOriginal(speaker, message)
         else
             local target = findTarget(table.concat(args, " ", 2))
             if target then
-                startShooting(target)
+                shootPlayer(target)
                 whisperToPlayer(speaker, "Shooting target!")
             else
                 whisperToPlayer(speaker, "Target not found")
@@ -2139,3 +2057,4 @@ if localPlayer then
 else
     warn("LocalPlayer not found!")
 end
+
