@@ -7,6 +7,7 @@ local localPlayer = Players.LocalPlayer
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
+local Workspace = game:GetService("Workspace")
 
 local FOLLOW_OFFSET = Vector3.new(0, 3, 5)
 local MOVEMENT_SMOOTHNESS = 0.1
@@ -26,6 +27,7 @@ local config = {
     AllowedPrefixes = {".", "/", "?", "!", "'", ":", ";", "@", "*", "&", "+", "_", "-", "=", "[", "{", "|", "~", "`"}
 }
 
+-- State variables
 local owners = {}
 local heartbeatConnection = nil
 local protectionConnection = nil
@@ -65,6 +67,8 @@ local blacklistedPlayers = {}
 local shootingTarget = nil
 local shootingConnection = nil
 local gunEquipped = false
+
+-- PvP Mode variables
 local PVP_MODE = {
     Enabled = false,
     Target = nil,
@@ -72,12 +76,18 @@ local PVP_MODE = {
     Countdown = 0,
     Connection = nil,
     KnifeThrowCooldown = 0,
-    MovementPatterns = {"Left", "Right", "Jump", "Back"},
+    MovementPatterns = {"Left", "Right", "Jump", "Back", "CircleLeft", "CircleRight"},
     CurrentMovement = nil,
-    MovementChangeTime = 0
+    MovementChangeTime = 0,
+    MovementDuration = 1,
+    LastShotTime = 0,
+    ShotCooldown = 0.5,
+    LastKnifeTime = 0,
+    KnifeCooldown = 1.5,
+    CombatDistance = 20
 }
 
-
+-- Utility functions
 local function logToDiscord(message)
     if not config.Discord.Enabled or config.Discord.WebhookURL == "" then return end
     
@@ -207,7 +217,6 @@ end
 
 local function whisperToPlayer(player, message)
     if quietModeUsers[player.Name] then
-        -- Use private system message for quiet mode
         local success, err = pcall(function()
             game:GetService("StarterGui"):SetCore("ChatMakeSystemMessage", {
                 Text = message,
@@ -279,23 +288,27 @@ local function showCommandsForRank(speaker)
             config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."whitelist", config.Prefix.."addowner", config.Prefix.."addadmin", config.Prefix.."removeadmin", 
             config.Prefix.."sus", config.Prefix.."stopsus", config.Prefix.."eliminate", config.Prefix.."win", config.Prefix.."commands", config.Prefix.."disable", config.Prefix.."enable", 
             config.Prefix.."stopcmds", config.Prefix.."rejoin", config.Prefix.."quit", config.Prefix.."describe", config.Prefix.."headadmin", config.Prefix.."pricing", 
-            config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."eliminateall", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."prefix", config.Prefix.."blacklist"
+            config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."eliminateall", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."prefix", config.Prefix.."blacklist",
+            config.Prefix.."pvp"
         },
         headadmin = {
             config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon", 
             config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."whitelist", config.Prefix.."addadmin", config.Prefix.."sus", config.Prefix.."stopsus", 
             config.Prefix.."eliminate", config.Prefix.."win", config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."rejoin", config.Prefix.."describe", 
-            config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."blacklist"
+            config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."trade", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."blacklist",
+            config.Prefix.."pvp"
         },
         admin = {
             config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon", 
             config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."sus", config.Prefix.."stopsus", config.Prefix.."eliminate", config.Prefix.."win", 
-            config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."describe", config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."blacklist"
+            config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."describe", config.Prefix.."pricing", config.Prefix.."freetrial", config.Prefix.."shoot", config.Prefix.."quiet", config.Prefix.."blacklist",
+            config.Prefix.."pvp"
         },
         freetrial = {
             config.Prefix.."follow", config.Prefix.."protect", config.Prefix.."say", config.Prefix.."reset", config.Prefix.."hide", config.Prefix.."dismiss", config.Prefix.."summon",
             config.Prefix.."fling", config.Prefix.."bringgun", config.Prefix.."sus", config.Prefix.."stopsus", config.Prefix.."eliminate", config.Prefix.."win", 
-            config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."describe", config.Prefix.."pricing", config.Prefix.."shoot", config.Prefix.."quiet"
+            config.Prefix.."commands", config.Prefix.."stopcmds", config.Prefix.."describe", config.Prefix.."pricing", config.Prefix.."shoot", config.Prefix.."quiet",
+            config.Prefix.."pvp"
         }
     }
 
@@ -389,6 +402,12 @@ local function stopActiveCommand()
             if gun then gun.Parent = localPlayer.Backpack end
         end
         gunEquipped = false
+    elseif activeCommand == "pvp" and PVP_MODE.Connection then
+        PVP_MODE.Enabled = false
+        PVP_MODE.Connection:Disconnect()
+        PVP_MODE.Connection = nil
+        PVP_MODE.Target = nil
+        PVP_MODE.Location = nil
     end
     flinging = false
     autoFarmActive = false
@@ -1063,7 +1082,6 @@ end
 local function shootPlayer(targetPlayer)
     if not targetPlayer or not targetPlayer.Character or blacklistedPlayers[targetPlayer.Name] then return end
 
-    -- Equip gun only once at the start
     if not gunEquipped then
         local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
         if not gun then
@@ -1088,13 +1106,11 @@ local function shootPlayer(targetPlayer)
     local myRoot = getRoot(localPlayer.Character)
     if not targetRoot or not myRoot then return end
 
-    -- Position ourselves at a distance from the target
     local shootPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * 10)
     shootPosition = Vector3.new(shootPosition.X, targetRoot.Position.Y, shootPosition.Z)
     myRoot.CFrame = CFrame.new(shootPosition, targetRoot.Position)
     task.wait(0.2)
 
-    -- Shoot continuously until target is dead or command is stopped
     while activeCommand == "shoot" and targetPlayer and targetPlayer.Parent and targetPlayer.Character do
         local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
         if not humanoid or humanoid.Health <= 0 then break end
@@ -1102,12 +1118,10 @@ local function shootPlayer(targetPlayer)
         local targetRoot = getRoot(targetPlayer.Character)
         if not targetRoot then break end
         
-        -- Update our position relative to the target
         shootPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * 10)
         shootPosition = Vector3.new(shootPosition.X, targetRoot.Position.Y, shootPosition.Z)
         myRoot.CFrame = CFrame.new(shootPosition, targetRoot.Position)
         
-        -- Shoot
         local gun = localPlayer.Character:FindFirstChild("Gun")
         if gun then
             local args = {
@@ -1148,7 +1162,6 @@ local function autoFarm()
     autoFarmConnection = RunService.Heartbeat:Connect(function()
         if not autoFarmActive then return end
 
-        -- Equip gun only once
         local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
         if not gun then
             local gunDrop = findGunDrop()
@@ -1163,7 +1176,6 @@ local function autoFarm()
             gun.Parent = localPlayer.Character
         end
 
-        -- Find targets with knife
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= localPlayer and player.Character and not isWhitelisted(player) and not blacklistedPlayers[player.Name] then
                 local knife = player.Character:FindFirstChild("Knife") or 
@@ -1175,7 +1187,6 @@ local function autoFarm()
             end
         end
 
-        -- Use knife if equipped
         if equipKnife() then
             for _, player in ipairs(Players:GetPlayers()) do
                 if player ~= localPlayer and player.Character and not isWhitelisted(player) and not blacklistedPlayers[player.Name] then
@@ -1221,7 +1232,6 @@ end
 local function blacklistPlayer(playerName)
     blacklistedPlayers[playerName] = true
     makeStandSpeak("Added "..playerName.." to blacklist!")
-    -- Kill the player if they're in the game
     local player = Players:FindFirstChild(playerName)
     if player and player.Character then
         flingPlayer(player)
@@ -1349,7 +1359,7 @@ local function describePlayer(targetName)
         target = findPlayerWithTool("Gun")
         if not target then return {"No sheriff found!"} end
     else
-        target = findTarget(targetName)
+        target = findTarget(table.concat(args, " ", 2))
         if not target then return {"Player not found!"} end
     end
     local messages = {}
@@ -1453,7 +1463,7 @@ local function showCommands(speaker)
         config.Prefix.."addowner (user), "..config.Prefix.."removeadmin (user), "..config.Prefix.."sus (user/murder/sheriff/random) (speed), "..config.Prefix.."stopsus",
         config.Prefix.."eliminate (random), "..config.Prefix.."win (user), "..config.Prefix.."commands, "..config.Prefix.."disable (cmd), "..config.Prefix.."enable (cmd), "..config.Prefix.."stopcmds, "..config.Prefix.."rejoin",
         config.Prefix.."describe (user/murd/sheriff), "..config.Prefix.."headadmin (user), "..config.Prefix.."pricing, "..config.Prefix.."freetrial, "..config.Prefix.."trade (user), "..config.Prefix.."eliminateall",
-        config.Prefix.."shoot (user/murd), "..config.Prefix.."quiet (on/off), "..config.Prefix.."prefix (new prefix), "..config.Prefix.."blacklist (user)"
+        config.Prefix.."shoot (user/murd), "..config.Prefix.."quiet (on/off), "..config.Prefix.."prefix (new prefix), "..config.Prefix.."blacklist (user), "..config.Prefix.."pvp (on/off)"
     }
     for _, group in ipairs(commandGroups) do
         makeStandSpeak(group)
@@ -1614,160 +1624,6 @@ local function respondToChat(speaker, message)
                     return "No law around here!"
                 end
             end
-            -- Add this to your chat processing function (respondToChat or similar)
-if PVP_MODE.Enabled and PVP_MODE.Target and speaker == PVP_MODE.Target and message:lower() == "here" then
-    PVP_MODE.Location = getRoot(speaker.Character).Position
-    local myRoot = getRoot(localPlayer.Character)
-    
-    -- Find a good position 20 studs away from the target
-    local attempts = 0
-    while attempts < 4 do
-        local direction = Vector3.new(math.random(-1, 1), 0, math.random(-1, 1)).Unit
-        local testPos = PVP_MODE.Location + (direction * 20)
-        
-        -- Simple wall check (raycast)
-        local raycastParams = RaycastParams.new()
-        raycastParams.FilterDescendantsInstances = {localPlayer.Character}
-        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-        local raycastResult = workspace:Raycast(PVP_MODE.Location, direction * 20, raycastParams)
-        
-        if not raycastResult or not raycastResult.Instance then
-            -- No wall hit, good position
-            myRoot.CFrame = CFrame.new(testPos, PVP_MODE.Location)
-            break
-        end
-        
-        attempts = attempts + 1
-    end
-    
-    if attempts >= 4 then
-        -- Just pick any position if we can't find a good one
-        myRoot.CFrame = CFrame.new(PVP_MODE.Location + Vector3.new(20, 0, 0), PVP_MODE.Location)
-    end
-    
-    -- Start countdown
-    PVP_MODE.Countdown = 3
-    PVP_MODE.Connection = RunService.Heartbeat:Connect(function()
-        if not PVP_MODE.Enabled or not PVP_MODE.Target or not PVP_MODE.Target.Character then
-            PVP_MODE.Enabled = false
-            PVP_MODE.Connection:Disconnect()
-            return
-        end
-        
-        local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-        local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
-        local targetRoot = getRoot(PVP_MODE.Target.Character)
-        local myRoot = getRoot(localPlayer.Character)
-        
-        if not targetRoot or not myRoot then return end
-        
-        -- Countdown handling
-        if PVP_MODE.Countdown > 0 then
-            if PVP_MODE.Countdown == math.floor(PVP_MODE.Countdown) then
-                makeStandSpeak(tostring(PVP_MODE.Countdown).."...")
-            end
-            PVP_MODE.Countdown = PVP_MODE.Countdown - 0.016 -- Roughly 1/60th of a second
-            
-            if PVP_MODE.Countdown <= 0 then
-                makeStandSpeak("GO!")
-                PVP_MODE.Countdown = 0
-            end
-            return
-        end
-        
-        -- Movement patterns for dodging
-        if os.time() - PVP_MODE.MovementChangeTime > 1 then
-            PVP_MODE.CurrentMovement = PVP_MODE.MovementPatterns[math.random(1, #PVP_MODE.MovementPatterns)]
-            PVP_MODE.MovementChangeTime = os.time()
-        end
-        
-        -- Face the target
-        myRoot.CFrame = CFrame.new(myRoot.Position, targetRoot.Position)
-        
-        if gun then
-            -- Gun behavior
-            gun.Parent = localPlayer.Character
-            
-            -- Dodge movement
-            if PVP_MODE.CurrentMovement == "Left" then
-                myRoot.CFrame = myRoot.CFrame * CFrame.new(-1, 0, 0)
-            elseif PVP_MODE.CurrentMovement == "Right" then
-                myRoot.CFrame = myRoot.CFrame * CFrame.new(1, 0, 0)
-            elseif PVP_MODE.CurrentMovement == "Jump" then
-                local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
-                if humanoid then humanoid.Jump = true end
-            elseif PVP_MODE.CurrentMovement == "Back" then
-                myRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -1)
-            end
-            
-            -- Shoot at predicted position
-            local predictedPos = targetRoot.Position + (targetRoot.Velocity * 0.2) -- Simple prediction
-            local args = {
-                1,
-                predictedPos,
-                "AH2"
-            }
-            local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-            if remote then
-                remote:InvokeServer(unpack(args))
-            end
-            
-        elseif knife then
-            -- Knife behavior
-            knife.Parent = localPlayer.Character
-            
-            -- Dodge movement
-            if PVP_MODE.CurrentMovement == "Left" then
-                myRoot.CFrame = myRoot.CFrame * CFrame.new(-2, 0, 0)
-            elseif PVP_MODE.CurrentMovement == "Right" then
-                myRoot.CFrame = myRoot.CFrame * CFrame.new(2, 0, 0)
-            elseif PVP_MODE.CurrentMovement == "Jump" then
-                local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
-                if humanoid then humanoid.Jump = true end
-            elseif PVP_MODE.CurrentMovement == "Back" then
-                myRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -2)
-            end
-            
-            -- Throw knife at predicted position
-            if os.time() - PVP_MODE.KnifeThrowCooldown > 1 then
-                local predictedPos = targetRoot.Position + (targetRoot.Velocity * 0.3) -- Simple prediction
-                local args = {
-                    myRoot.CFrame,
-                    predictedPos
-                }
-                local remote = knife:FindFirstChild("Throw")
-                if remote then
-                    remote:FireServer(unpack(args))
-                end
-                PVP_MODE.KnifeThrowCooldown = os.time()
-            end
-        end
-    end)
-end
-
--- Also add this to handle when the target says "no"
-if PVP_MODE.Enabled and PVP_MODE.Target and speaker == PVP_MODE.Target and message:lower() == "no" then
-    makeStandSpeak("Aww ok ):")
-    PVP_MODE.Enabled = false
-    if PVP_MODE.Connection then
-        PVP_MODE.Connection:Disconnect()
-        PVP_MODE.Connection = nil
-    end
-    
-    -- Default behavior based on weapon
-    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-    local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
-    
-    if gun then
-        -- Shoot normally
-        startShooting(PVP_MODE.Target)
-    elseif knife then
-        -- Eliminate normally
-        owners = {PVP_MODE.Target}
-        eliminatePlayers()
-    end
-end
-
         }
     }
     for _, responseGroup in ipairs(responsePatterns) do
@@ -1796,6 +1652,157 @@ local function processWhisper(speaker, recipient, message)
     
     if message:sub(1,1) == config.Prefix or message:sub(1,1) == "!" then
         processCommand(speaker, message)
+    end
+end
+
+-- PvP Mode Functions
+local function startPVPMode(targetPlayer)
+    stopActiveCommand()
+    activeCommand = "pvp"
+    PVP_MODE.Enabled = true
+    PVP_MODE.Target = targetPlayer
+    PVP_MODE.Location = nil
+    PVP_MODE.Countdown = 3
+    PVP_MODE.CurrentMovement = nil
+    PVP_MODE.MovementChangeTime = 0
+    
+    -- Teleport behind the target
+    local targetRoot = getRoot(targetPlayer.Character)
+    local myRoot = getRoot(localPlayer.Character)
+    if targetRoot and myRoot then
+        myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -PVP_MODE.CombatDistance)
+        makeStandSpeak("Hey "..targetPlayer.Name.."! Let's 1v1!")
+        makeStandSpeak("Pick a location and say 'here'")
+    end
+end
+
+local function stopPVPMode()
+    PVP_MODE.Enabled = false
+    if PVP_MODE.Connection then
+        PVP_MODE.Connection:Disconnect()
+        PVP_MODE.Connection = nil
+    end
+    PVP_MODE.Target = nil
+    PVP_MODE.Location = nil
+    activeCommand = nil
+end
+
+local function handlePVPCombat()
+    if not PVP_MODE.Enabled or not PVP_MODE.Target or not PVP_MODE.Target.Character then
+        stopPVPMode()
+        return
+    end
+    
+    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+    local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
+    local targetRoot = getRoot(PVP_MODE.Target.Character)
+    local myRoot = getRoot(localPlayer.Character)
+    
+    if not targetRoot or not myRoot then 
+        stopPVPMode()
+        return
+    end
+    
+    -- Countdown handling
+    if PVP_MODE.Countdown > 0 then
+        if PVP_MODE.Countdown == math.floor(PVP_MODE.Countdown) then
+            makeStandSpeak(tostring(PVP_MODE.Countdown).."...")
+        end
+        PVP_MODE.Countdown = PVP_MODE.Countdown - 0.016
+        
+        if PVP_MODE.Countdown <= 0 then
+            makeStandSpeak("GO!")
+            PVP_MODE.Countdown = 0
+        end
+        return
+    end
+    
+    -- Movement patterns for dodging
+    if os.time() - PVP_MODE.MovementChangeTime > PVP_MODE.MovementDuration then
+        PVP_MODE.CurrentMovement = PVP_MODE.MovementPatterns[math.random(1, #PVP_MODE.MovementPatterns)]
+        PVP_MODE.MovementChangeTime = os.time()
+        PVP_MODE.MovementDuration = math.random(5, 10) / 10 -- 0.5 to 1 second
+    end
+    
+    -- Face the target
+    myRoot.CFrame = CFrame.new(myRoot.Position, targetRoot.Position)
+    
+    if gun then
+        -- Gun behavior
+        gun.Parent = localPlayer.Character
+        
+        -- Dodge movement
+        if PVP_MODE.CurrentMovement == "Left" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(-1.5, 0, 0)
+        elseif PVP_MODE.CurrentMovement == "Right" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(1.5, 0, 0)
+        elseif PVP_MODE.CurrentMovement == "Jump" then
+            local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then humanoid.Jump = true end
+        elseif PVP_MODE.CurrentMovement == "Back" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -1.5)
+        elseif PVP_MODE.CurrentMovement == "CircleLeft" then
+            local angle = os.clock() * 5
+            local offset = Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+            myRoot.CFrame = CFrame.new(PVP_MODE.Location + offset, targetRoot.Position)
+        elseif PVP_MODE.CurrentMovement == "CircleRight" then
+            local angle = -os.clock() * 5
+            local offset = Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+            myRoot.CFrame = CFrame.new(PVP_MODE.Location + offset, targetRoot.Position)
+        end
+        
+        -- Shoot at predicted position
+        if os.time() - PVP_MODE.LastShotTime > PVP_MODE.ShotCooldown then
+            local predictedPos = targetRoot.Position + (targetRoot.Velocity * 0.3) -- Prediction with velocity
+            local args = {
+                1,
+                predictedPos,
+                "AH2"
+            }
+            local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+            if remote then
+                remote:InvokeServer(unpack(args))
+            end
+            PVP_MODE.LastShotTime = os.time()
+        end
+        
+    elseif knife then
+        -- Knife behavior
+        knife.Parent = localPlayer.Character
+        
+        -- Dodge movement
+        if PVP_MODE.CurrentMovement == "Left" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(-2, 0, 0)
+        elseif PVP_MODE.CurrentMovement == "Right" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(2, 0, 0)
+        elseif PVP_MODE.CurrentMovement == "Jump" then
+            local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then humanoid.Jump = true end
+        elseif PVP_MODE.CurrentMovement == "Back" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -2)
+        elseif PVP_MODE.CurrentMovement == "CircleLeft" then
+            local angle = os.clock() * 5
+            local offset = Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+            myRoot.CFrame = CFrame.new(PVP_MODE.Location + offset, targetRoot.Position)
+        elseif PVP_MODE.CurrentMovement == "CircleRight" then
+            local angle = -os.clock() * 5
+            local offset = Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+            myRoot.CFrame = CFrame.new(PVP_MODE.Location + offset, targetRoot.Position)
+        end
+        
+        -- Throw knife at predicted position
+        if os.time() - PVP_MODE.LastKnifeTime > PVP_MODE.KnifeCooldown then
+            local predictedPos = targetRoot.Position + (targetRoot.Velocity * 0.4) -- Prediction with velocity
+            local args = {
+                myRoot.CFrame,
+                predictedPos
+            }
+            local remote = knife:FindFirstChild("Throw")
+            if remote then
+                remote:FireServer(unpack(args))
+            end
+            PVP_MODE.LastKnifeTime = os.time()
+        end
     end
 end
 
@@ -1864,61 +1871,6 @@ local function processCommandOriginal(speaker, message)
                 whisperToPlayer(speaker, "Target not found")
             end
         end
-        -- Add this to your command processing function
-elseif cmd == config.Prefix.."pvp" and args[2] then
-    if args[2]:lower() == "on" then
-        local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-        local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
-               if gun then
-            local target = findPlayerWithTool("Knife")
-            if target then
-                PVP_MODE.Enabled = true
-                PVP_MODE.Target = target
-                PVP_MODE.Location = nil
-                whisperToPlayer(speaker, "1v1 mode activated against "..target.Name)
-                
-                -- Teleport behind the murderer
-                local targetRoot = getRoot(target.Character)
-                local myRoot = getRoot(localPlayer.Character)
-                if targetRoot and myRoot then
-                    myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -20)
-                    makeStandSpeak("Hey "..target.Name.."! Let's 1v1!")
-                    makeStandSpeak("Pick a location and say 'here'")
-                end
-            else
-                whisperToPlayer(speaker, "No murderer found for 1v1")
-            end
-        elseif knife then
-            local target = findPlayerWithTool("Gun")
-            if target then
-                PVP_MODE.Enabled = true
-                PVP_MODE.Target = target
-                PVP_MODE.Location = nil
-                whisperToPlayer(speaker, "1v1 mode activated against "..target.Name)
-                
-                -- Teleport to the sheriff
-                local targetRoot = getRoot(target.Character)
-                local myRoot = getRoot(localPlayer.Character)
-                if targetRoot and myRoot then
-                    myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -20)
-                    makeStandSpeak("Hey "..target.Name.."! Let's 1v1!")
-                    makeStandSpeak("Pick a location and say 'here'")
-                end
-            else
-                whisperToPlayer(speaker, "No sheriff found for 1v1")
-            end
-        else
-            whisperToPlayer(speaker, "You need either a gun or knife for 1v1 mode")
-        end
-    elseif args[2]:lower() == "off" then
-        PVP_MODE.Enabled = false
-        if PVP_MODE.Connection then
-            PVP_MODE.Connection:Disconnect()
-            PVP_MODE.Connection = nil
-        end
-        whisperToPlayer(speaker, "1v1 mode deactivated")
-    end
-
     elseif cmd == config.Prefix.."protect" and args[2] then
         if args[2]:lower() == "on" then
             startProtection()
@@ -2195,6 +2147,34 @@ elseif cmd == config.Prefix.."pvp" and args[2] then
         config.Prefix = newPrefix
         whisperToPlayer(speaker, "Command prefix changed to: "..newPrefix)
         logToDiscord("Prefix changed to: "..newPrefix.." by "..speaker.Name)
+    elseif cmd == config.Prefix.."pvp" and args[2] then
+        if args[2]:lower() == "on" then
+            local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+            local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
+            
+            if gun then
+                local target = findPlayerWithTool("Knife")
+                if target then
+                    startPVPMode(target)
+                    whisperToPlayer(speaker, "1v1 mode activated against "..target.Name)
+                else
+                    whisperToPlayer(speaker, "No murderer found for 1v1")
+                end
+            elseif knife then
+                local target = findPlayerWithTool("Gun")
+                if target then
+                    startPVPMode(target)
+                    whisperToPlayer(speaker, "1v1 mode activated against "..target.Name)
+                else
+                    whisperToPlayer(speaker, "No sheriff found for 1v1")
+                end
+            else
+                whisperToPlayer(speaker, "You need either a gun or knife for 1v1 mode")
+            end
+        elseif args[2]:lower() == "off" then
+            stopPVPMode()
+            whisperToPlayer(speaker, "1v1 mode deactivated")
+        end
     end
 end
 
@@ -2302,6 +2282,63 @@ local function setupChatListeners()
         player.Chatted:Connect(function(message)
             respondToChat(player, message)
             processCommand(player, message)
+            
+            -- Handle PvP location selection
+            if PVP_MODE.Enabled and PVP_MODE.Target and player == PVP_MODE.Target and message:lower() == "here" then
+                local targetRoot = getRoot(player.Character)
+                if targetRoot then
+                    PVP_MODE.Location = targetRoot.Position
+                    local myRoot = getRoot(localPlayer.Character)
+                    
+                    -- Find a good position away from the target
+                    local attempts = 0
+                    local foundPosition = false
+                    while attempts < 4 and not foundPosition do
+                        local direction = Vector3.new(math.random(-1, 1), 0, math.random(-1, 1)).Unit
+                        local testPos = PVP_MODE.Location + (direction * PVP_MODE.CombatDistance)
+                        
+                        -- Simple wall check (raycast)
+                        local raycastParams = RaycastParams.new()
+                        raycastParams.FilterDescendantsInstances = {localPlayer.Character}
+                        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+                        local raycastResult = workspace:Raycast(PVP_MODE.Location, direction * PVP_MODE.CombatDistance, raycastParams)
+                        
+                        if not raycastResult or not raycastResult.Instance then
+                            -- No wall hit, good position
+                            myRoot.CFrame = CFrame.new(testPos, PVP_MODE.Location)
+                            foundPosition = true
+                        end
+                        
+                        attempts = attempts + 1
+                    end
+                    
+                    if not foundPosition then
+                        -- Just pick any position if we can't find a good one
+                        myRoot.CFrame = CFrame.new(PVP_MODE.Location + Vector3.new(PVP_MODE.CombatDistance, 0, 0), PVP_MODE.Location)
+                    end
+                    
+                    -- Start PvP combat
+                    PVP_MODE.Countdown = 3
+                    PVP_MODE.Connection = RunService.Heartbeat:Connect(handlePVPCombat)
+                end
+            end
+            
+            -- Handle PvP decline
+            if PVP_MODE.Enabled and PVP_MODE.Target and player == PVP_MODE.Target and message:lower() == "no" then
+                makeStandSpeak("Aww ok ):")
+                stopPVPMode()
+                
+                -- Default behavior based on weapon
+                local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+                local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
+                
+                if gun then
+                    startShooting(PVP_MODE.Target)
+                elseif knife then
+                    owners = {PVP_MODE.Target}
+                    eliminatePlayers()
+                end
+            end
         end)
     end
     
@@ -2337,6 +2374,9 @@ local function setupChatListeners()
         if hasAdminPermissions(player) then
             checkAdminLeft()
         end
+        if PVP_MODE.Enabled and PVP_MODE.Target and player == PVP_MODE.Target then
+            stopPVPMode()
+        end
     end)
 end
 
@@ -2356,8 +2396,8 @@ if localPlayer then
     script.Destroying:Connect(function()
         dismissStand()
         stopSus()
+        stopPVPMode()
     end)
 else
     warn("LocalPlayer not found!")
 end
-
