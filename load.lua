@@ -10,6 +10,7 @@ local HttpService = game:GetService("HttpService")
 local Workspace = game:GetService("Workspace")
 local PathfindingService = game:GetService("PathfindingService")
 
+-- Configuration
 local FOLLOW_OFFSET = Vector3.new(0, 3, 5)
 local MOVEMENT_SMOOTHNESS = 0.1
 local PROTECTION_RADIUS = 15
@@ -69,28 +70,40 @@ local shootingTarget = nil
 local shootingConnection = nil
 local gunEquipped = false
 
--- PvP Mode variables
+-- Enhanced PvP Mode variables
 local PVP_MODE = {
     Enabled = false,
     Target = nil,
     Location = nil,
     Countdown = 0,
     Connection = nil,
-    KnifeThrowCooldown = 0,
-    MovementPatterns = {"Left", "Right", "Jump", "Back", "CircleLeft", "CircleRight"},
-    CurrentMovement = nil,
-    MovementChangeTime = 0,
-    MovementDuration = 1,
     LastShotTime = 0,
     ShotCooldown = 0.5,
     LastKnifeTime = 0,
     KnifeCooldown = 1.5,
     CombatDistance = 25,
     WalkSpeed = 16,
-    IsWalking = false,
-    Path = nil
+    Path = nil,
+    LastMovementChange = 0,
+    MovementDuration = 1,
+    CurrentMovement = nil,
+    MovementPatterns = {
+        "StrafeLeft", "StrafeRight", "Jump", "Backpedal", 
+        "CircleLeft", "CircleRight", "RandomZigzag", "Advance",
+        "Retreat", "FeintLeft", "FeintRight", "QuickAdvance"
+    },
+    ResponseTimer = 0,
+    WaitingForResponse = false,
+    CombatStyle = nil, -- "Gun" or "Knife"
+    LastPosition = nil,
+    StuckTimer = 0,
+    LastHealthCheck = 0,
+    Aggressiveness = 0.7, -- 0 to 1 (how aggressive the AI is)
+    Defensiveness = 0.3, -- 0 to 1 (how defensive the AI is)
+    Accuracy = 0.85, -- 0 to 1 (shot accuracy)
+    ReactionTime = 0.2, -- seconds
+    MovementVariance = 0.3 -- randomness in movement patterns
 }
-
 
 -- Utility functions
 local function logToDiscord(message)
@@ -1417,7 +1430,7 @@ local function checkCommandAbuse(speaker)
     if mainOwner and speaker.Name == mainOwner.Name then return false end
     if isPlayerSuspended(speaker.Name) then
         local remaining = suspendedPlayers[speaker.Name] - os.time()
-        makeStandSpeak(speaker.Name.." is suspended for "..remaining.." more seconds!")
+        makeStandSpeak(speaker.Name.." is suspended for "..remaining.." more seconds")
         return true
     end
     local currentTime = os.time()
@@ -1690,52 +1703,152 @@ local function stopPVPMode()
     end
 end
 
-local function handlePVPCombat()
-    if not PVP_MODE.Enabled or not PVP_MODE.Target or not PVP_MODE.Target.Character then
-        stopPVPMode()
-        return
+local function calculatePredictedPosition(targetRoot, weaponType)
+    -- More sophisticated prediction based on weapon type and distance
+    local distance = (targetRoot.Position - getRoot(localPlayer.Character).Position).Magnitude
+    local predictionTime = 0
+    
+    if weaponType == "Gun" then
+        -- Guns are fast, less prediction needed
+        predictionTime = math.clamp(distance / 100, 0.1, 0.3) * (1 + (1 - PVP_MODE.Accuracy) * 0.5
+    else
+        -- Knives are slower, more prediction needed
+        predictionTime = math.clamp(distance / 50, 0.2, 0.6) * (1 + (1 - PVP_MODE.Accuracy) * 0.8
     end
     
-    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-    local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
-    local targetRoot = getRoot(PVP_MODE.Target.Character)
-    local myRoot = getRoot(localPlayer.Character)
-    local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
+    -- Add some randomness to make it less perfect
+    predictionTime = predictionTime * (0.9 + math.random() * 0.2)
     
-    if not targetRoot or not myRoot or not humanoid then 
-        stopPVPMode()
-        return
-    end
+    return targetRoot.Position + (targetRoot.Velocity * predictionTime)
+end
+
+local function isPositionSafe(position)
+    -- Check if position is safe (not inside walls, etc.)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {localPlayer.Character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
     
-    -- Countdown handling (fixed to show all numbers)
-    if PVP_MODE.Countdown > 0 then
-        if math.floor(PVP_MODE.Countdown) ~= math.floor(PVP_MODE.Countdown + 0.016) then
-            makeStandSpeak(tostring(math.floor(PVP_MODE.Countdown)).."...")
+    -- Check if position is inside walls
+    local region = Region3.new(position - Vector3.new(2,2,2), position + Vector3.new(2,2,2))
+    local parts = workspace:FindPartsInRegion3(region, nil, math.huge)
+    for _, part in ipairs(parts) do
+        if part.CanCollide and not part:IsDescendantOf(localPlayer.Character) then
+            return false
         end
-        PVP_MODE.Countdown = PVP_MODE.Countdown - 0.016
+    end
+    
+    -- Check if position is above ground
+    local raycastResult = workspace:Raycast(position, Vector3.new(0, -10, 0), raycastParams)
+    if not raycastResult then
+        return false
+    end
+    
+    return true
+end
+
+local function findSafePositionNear(targetPosition, minDistance, maxDistance)
+    -- Try to find a safe position near the target
+    for i = 1, 10 do
+        local direction = Vector3.new(
+            math.random() * 2 - 1,
+            0,
+            math.random() * 2 - 1
+        ).Unit
         
-        if PVP_MODE.Countdown <= 0 then
-            makeStandSpeak("GO!")
-            PVP_MODE.Countdown = 0
-            humanoid.WalkSpeed = PVP_MODE.WalkSpeed -- Set normal walk speed when combat starts
+        local distance = math.random(minDistance * 100, maxDistance * 100) / 100
+        local testPos = targetPosition + (direction * distance)
+        testPos = Vector3.new(testPos.X, targetPosition.Y, testPos.Z)
+        
+        if isPositionSafe(testPos) then
+            return testPos
+        end
+    end
+    return targetPosition + Vector3.new(maxDistance, 0, 0) -- Fallback position
+end
+
+local function executeMovementPattern(humanoid, targetRoot, myRoot)
+    local currentTime = os.clock()
+    
+    -- Change movement pattern if time elapsed or if stuck
+    if currentTime - PVP_MODE.LastMovementChange > PVP_MODE.MovementDuration or 
+       (PVP_MODE.LastPosition and (myRoot.Position - PVP_MODE.LastPosition).Magnitude < 1) then
+        
+        PVP_MODE.CurrentMovement = PVP_MODE.MovementPatterns[math.random(1, #PVP_MODE.MovementPatterns)]
+        PVP_MODE.LastMovementChange = currentTime
+        PVP_MODE.MovementDuration = 0.5 + math.random() * 1.5 -- 0.5 to 2 seconds
+    end
+    
+    PVP_MODE.LastPosition = myRoot.Position
+    
+    local desiredPosition = myRoot.Position
+    local targetDirection = (targetRoot.Position - myRoot.Position).Unit
+    local rightVector = targetRoot.CFrame.RightVector
+    
+    -- Execute current movement pattern
+    if PVP_MODE.CurrentMovement == "StrafeLeft" then
+        desiredPosition = myRoot.Position + (-rightVector * 5 * PVP_MODE.MovementVariance)
+    elseif PVP_MODE.CurrentMovement == "StrafeRight" then
+        desiredPosition = myRoot.Position + (rightVector * 5 * PVP_MODE.MovementVariance)
+    elseif PVP_MODE.CurrentMovement == "Jump" then
+        humanoid.Jump = true
+    elseif PVP_MODE.CurrentMovement == "Backpedal" then
+        desiredPosition = myRoot.Position + (-targetDirection * 4 * PVP_MODE.MovementVariance)
+    elseif PVP_MODE.CurrentMovement == "CircleLeft" then
+        local angle = currentTime * 3
+        desiredPosition = targetRoot.Position + (
+            (-rightVector * math.cos(angle) * 7) + 
+            (targetDirection * math.sin(angle) * 7)
+    elseif PVP_MODE.CurrentMovement == "CircleRight" then
+        local angle = currentTime * 3
+        desiredPosition = targetRoot.Position + (
+            (rightVector * math.cos(angle) * 7) + 
+            (targetDirection * math.sin(angle) * 7))
+    elseif PVP_MODE.CurrentMovement == "RandomZigzag" then
+        local zigzag = math.sin(currentTime * 10) * 5
+        desiredPosition = myRoot.Position + (rightVector * zigzag * PVP_MODE.MovementVariance)
+    elseif PVP_MODE.CurrentMovement == "Advance" then
+        desiredPosition = myRoot.Position + (targetDirection * 5 * PVP_MODE.MovementVariance)
+    elseif PVP_MODE.CurrentMovement == "Retreat" then
+        desiredPosition = myRoot.Position + (-targetDirection * 5 * PVP_MODE.MovementVariance)
+    elseif PVP_MODE.CurrentMovement == "FeintLeft" then
+        if math.random() < 0.7 then
+            desiredPosition = myRoot.Position + (-rightVector * 8 * PVP_MODE.MovementVariance)
         else
-            humanoid.WalkSpeed = 0 -- Freeze during countdown
-            return
+            desiredPosition = myRoot.Position + (rightVector * 8 * PVP_MODE.MovementVariance)
+        end
+    elseif PVP_MODE.CurrentMovement == "FeintRight" then
+        if math.random() < 0.7 then
+            desiredPosition = myRoot.Position + (rightVector * 8 * PVP_MODE.MovementVariance)
+        else
+            desiredPosition = myRoot.Position + (-rightVector * 8 * PVP_MODE.MovementVariance)
+        end
+    elseif PVP_MODE.CurrentMovement == "QuickAdvance" then
+        desiredPosition = myRoot.Position + (targetDirection * 8 * PVP_MODE.MovementVariance)
+    end
+    
+    -- Adjust desired position based on combat style
+    if PVP_MODE.CombatStyle == "Gun" then
+        -- Prefer to maintain distance
+        local distance = (targetRoot.Position - desiredPosition).Magnitude
+        if distance < PVP_MODE.CombatDistance * 0.8 then
+            desiredPosition = desiredPosition + (-targetDirection * 5)
+        elseif distance > PVP_MODE.CombatDistance * 1.2 then
+            desiredPosition = desiredPosition + (targetDirection * 3)
+        end
+    else
+        -- Knife - try to close distance
+        local distance = (targetRoot.Position - desiredPosition).Magnitude
+        if distance > 10 then
+            desiredPosition = desiredPosition + (targetDirection * 5)
         end
     end
     
-    -- Movement patterns for dodging
-    if os.time() - PVP_MODE.MovementChangeTime > PVP_MODE.MovementDuration then
-        PVP_MODE.CurrentMovement = PVP_MODE.MovementPatterns[math.random(1, #PVP_MODE.MovementPatterns)]
-        PVP_MODE.MovementChangeTime = os.time()
-        PVP_MODE.MovementDuration = math.random(5, 10) / 10 -- 0.5 to 1 second
+    -- Make sure desired position is safe
+    if not isPositionSafe(desiredPosition) then
+        desiredPosition = findSafePositionNear(myRoot.Position, 5, 10)
     end
     
-    -- Calculate desired position (maintain combat distance)
-    local desiredPosition = targetRoot.Position + (targetRoot.CFrame.LookVector * -PVP_MODE.CombatDistance)
-    desiredPosition = Vector3.new(desiredPosition.X, targetRoot.Position.Y, desiredPosition.Z)
-    
-    -- Use pathfinding to move naturally
+    -- Move to desired position using pathfinding
     if not PVP_MODE.Path then
         PVP_MODE.Path = PathfindingService:CreatePath({
             AgentRadius = 2,
@@ -1744,7 +1857,6 @@ local function handlePVPCombat()
         })
     end
     
-    -- Compute path to desired position
     PVP_MODE.Path:ComputeAsync(myRoot.Position, desiredPosition)
     
     if PVP_MODE.Path.Status == Enum.PathStatus.Success then
@@ -1777,83 +1889,172 @@ local function handlePVPCombat()
         -- Fallback to direct movement if pathfinding fails
         humanoid:MoveTo(desiredPosition)
     end
+end
+
+local function handleGunCombat(humanoid, targetRoot, myRoot)
+    -- Gun combat behavior
+    local gun = localPlayer.Character:FindFirstChild("Gun")
+    if not gun then return end
+    
+    -- Calculate predicted position with accuracy factor
+    local predictedPos = calculatePredictedPosition(targetRoot, "Gun")
+    
+    -- Add some inaccuracy based on the Accuracy stat
+    if math.random() > PVP_MODE.Accuracy then
+        predictedPos = predictedPos + Vector3.new(
+            (math.random() - 0.5) * 5,
+            (math.random() - 0.5) * 3,
+            (math.random() - 0.5) * 5
+        )
+    end
+    
+    -- Shoot at predicted position if cooldown is over
+    if os.clock() - PVP_MODE.LastShotTime > PVP_MODE.ShotCooldown then
+        local args = {
+            1,
+            predictedPos,
+            "AH2"
+        }
+        local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+        if remote then
+            remote:InvokeServer(unpack(args))
+        end
+        PVP_MODE.LastShotTime = os.clock()
+    end
+    
+    -- Face the target but with some randomness
+    humanoid.AutoRotate = math.random() < 0.8 -- 80% chance to face target
+    
+    -- Movement patterns for gun combat
+    executeMovementPattern(humanoid, targetRoot, myRoot)
+end
+
+local function handleKnifeCombat(humanoid, targetRoot, myRoot)
+    -- Knife combat behavior
+    local knife = localPlayer.Character:FindFirstChild("Knife")
+    if not knife then return end
+    
+    -- Calculate predicted position with accuracy factor
+    local predictedPos = calculatePredictedPosition(targetRoot, "Knife")
+    
+    -- Throw knife at predicted position if cooldown is over
+    if os.clock() - PVP_MODE.LastKnifeTime > PVP_MODE.KnifeCooldown then
+        local args = {
+            myRoot.CFrame,
+            predictedPos
+        }
+        local remote = knife:FindFirstChild("Throw")
+        if remote then
+            remote:FireServer(unpack(args))
+        end
+        PVP_MODE.LastKnifeTime = os.clock()
+    end
     
     -- Face the target
     humanoid.AutoRotate = true
     
+    -- Movement patterns for knife combat (more aggressive)
+    executeMovementPattern(humanoid, targetRoot, myRoot)
+end
+
+local function handlePVPCombat()
+    if not PVP_MODE.Enabled or not PVP_MODE.Target or not PVP_MODE.Target.Character then
+        stopPVPMode()
+        return
+    end
+    
+    local targetRoot = getRoot(PVP_MODE.Target.Character)
+    local myRoot = getRoot(localPlayer.Character)
+    local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
+    
+    if not targetRoot or not myRoot or not humanoid then 
+        stopPVPMode()
+        return
+    end
+    
+    -- Countdown handling
+    if PVP_MODE.Countdown > 0 then
+        if math.floor(PVP_MODE.Countdown) ~= math.floor(PVP_MODE.Countdown + 0.016) then
+            makeStandSpeak(tostring(math.floor(PVP_MODE.Countdown)).."...")
+        end
+        PVP_MODE.Countdown = PVP_MODE.Countdown - 0.016
+        
+        if PVP_MODE.Countdown <= 0 then
+            makeStandSpeak("GO!")
+            PVP_MODE.Countdown = 0
+            humanoid.WalkSpeed = PVP_MODE.WalkSpeed
+        else
+            humanoid.WalkSpeed = 0 -- Freeze during countdown
+            return
+        end
+    end
+    
+    -- Check if we're waiting for response
+    if PVP_MODE.WaitingForResponse then
+        PVP_MODE.ResponseTimer = PVP_MODE.ResponseTimer - 0.016
+        if PVP_MODE.ResponseTimer <= 0 then
+            makeStandSpeak("Time's up! Eliminating "..PVP_MODE.Target.Name.."!")
+            PVP_MODE.WaitingForResponse = false
+            if PVP_MODE.CombatStyle == "Gun" then
+                startShooting(PVP_MODE.Target)
+            else
+                owners = {PVP_MODE.Target}
+                eliminatePlayers()
+            end
+            stopPVPMode()
+            return
+        end
+        return
+    end
+    
+    -- Determine combat style based on equipped weapon
+    local gun = localPlayer.Character:FindFirstChild("Gun")
+    local knife = localPlayer.Character:FindFirstChild("Knife")
+    
     if gun then
-        -- Gun behavior
-        gun.Parent = localPlayer.Character
-        
-        -- Movement handling based on current pattern
-        if PVP_MODE.CurrentMovement == "Left" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.RightVector * -3))
-        elseif PVP_MODE.CurrentMovement == "Right" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.RightVector * 3))
-        elseif PVP_MODE.CurrentMovement == "Jump" then
-            humanoid.Jump = true
-        elseif PVP_MODE.CurrentMovement == "Back" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.LookVector * -3))
-        elseif PVP_MODE.CurrentMovement == "CircleLeft" then
-            local angle = os.clock() * 3
-            local offset = targetRoot.CFrame.RightVector * -math.cos(angle) * 5 + targetRoot.CFrame.LookVector * math.sin(angle) * 5
-            humanoid:MoveTo(targetRoot.Position + offset)
-        elseif PVP_MODE.CurrentMovement == "CircleRight" then
-            local angle = os.clock() * 3
-            local offset = targetRoot.CFrame.RightVector * math.cos(angle) * 5 + targetRoot.CFrame.LookVector * math.sin(angle) * 5
-            humanoid:MoveTo(targetRoot.Position + offset)
-        end
-        
-        -- Shoot at predicted position
-        if os.time() - PVP_MODE.LastShotTime > PVP_MODE.ShotCooldown then
-            local predictedPos = targetRoot.Position + (targetRoot.Velocity * 0.3) -- Prediction with velocity
-            local args = {
-                1,
-                predictedPos,
-                "AH2"
-            }
-            local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-            if remote then
-                remote:InvokeServer(unpack(args))
-            end
-            PVP_MODE.LastShotTime = os.time()
-        end
-        
+        PVP_MODE.CombatStyle = "Gun"
+        handleGunCombat(humanoid, targetRoot, myRoot)
     elseif knife then
-        -- Knife behavior
-        knife.Parent = localPlayer.Character
+        PVP_MODE.CombatStyle = "Knife"
+        handleKnifeCombat(humanoid, targetRoot, myRoot)
+    else
+        -- No weapon equipped, try to find one
+        local gunInBackpack = localPlayer.Backpack:FindFirstChild("Gun")
+        local knifeInBackpack = localPlayer.Backpack:FindFirstChild("Knife")
         
-        -- Movement handling based on current pattern
-        if PVP_MODE.CurrentMovement == "Left" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.RightVector * -4))
-        elseif PVP_MODE.CurrentMovement == "Right" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.RightVector * 4))
-        elseif PVP_MODE.CurrentMovement == "Jump" then
-            humanoid.Jump = true
-        elseif PVP_MODE.CurrentMovement == "Back" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.LookVector * -4))
-        elseif PVP_MODE.CurrentMovement == "CircleLeft" then
-            local angle = os.clock() * 3
-            local offset = targetRoot.CFrame.RightVector * -math.cos(angle) * 6 + targetRoot.CFrame.LookVector * math.sin(angle) * 6
-            humanoid:MoveTo(targetRoot.Position + offset)
-        elseif PVP_MODE.CurrentMovement == "CircleRight" then
-            local angle = os.clock() * 3
-            local offset = targetRoot.CFrame.RightVector * math.cos(angle) * 6 + targetRoot.CFrame.LookVector * math.sin(angle) * 6
-            humanoid:MoveTo(targetRoot.Position + offset)
-        end
-        
-        -- Throw knife at predicted position
-        if os.time() - PVP_MODE.LastKnifeTime > PVP_MODE.KnifeCooldown then
-            local predictedPos = targetRoot.Position + (targetRoot.Velocity * 0.4) -- Prediction with velocity
-            local args = {
-                myRoot.CFrame,
-                predictedPos
-            }
-            local remote = knife:FindFirstChild("Throw")
-            if remote then
-                remote:FireServer(unpack(args))
+        if gunInBackpack then
+            gunInBackpack.Parent = localPlayer.Character
+        elseif knifeInBackpack then
+            knifeInBackpack.Parent = localPlayer.Character
+        else
+            -- No weapons available, try to find gun drop
+            local gunDrop = findGunDrop()
+            if gunDrop then
+                myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
+                task.wait(0.5)
+            else
+                -- No weapons at all, default to knife attacks
+                owners = {PVP_MODE.Target}
+                eliminatePlayers()
+                stopPVPMode()
             end
-            PVP_MODE.LastKnifeTime = os.time()
+        end
+    end
+    
+    -- Health check and adjust behavior
+    if os.clock() - PVP_MODE.LastHealthCheck > 2 then
+        PVP_MODE.LastHealthCheck = os.clock()
+        
+        -- Adjust behavior based on health
+        local myHealth = humanoid.Health / humanoid.MaxHealth
+        if myHealth < 0.5 then
+            -- More defensive when low health
+            PVP_MODE.Defensiveness = math.min(0.8, PVP_MODE.Defensiveness + 0.2)
+            PVP_MODE.Aggressiveness = math.max(0.2, PVP_MODE.Aggressiveness - 0.2)
+        else
+            -- Reset to default behavior
+            PVP_MODE.Defensiveness = 0.3
+            PVP_MODE.Aggressiveness = 0.7
         end
     end
 end
@@ -1864,16 +2065,19 @@ local function startPVPMode(targetPlayer)
     PVP_MODE.Enabled = true
     PVP_MODE.Target = targetPlayer
     PVP_MODE.Location = nil
-    PVP_MODE.Countdown = 3.5 -- Slightly longer to show all numbers
+    PVP_MODE.Countdown = 0
     PVP_MODE.CurrentMovement = nil
-    PVP_MODE.MovementChangeTime = 0
+    PVP_MODE.LastMovementChange = 0
+    PVP_MODE.ResponseTimer = 10
+    PVP_MODE.WaitingForResponse = true
     
     -- Check if we have a gun or knife
     local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
     local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
     
     if gun then
-        -- Sheriff behavior - approach from behind
+        PVP_MODE.CombatStyle = "Gun"
+        -- Approach from behind for gun combat
         local targetRoot = getRoot(targetPlayer.Character)
         local myRoot = getRoot(localPlayer.Character)
         if targetRoot and myRoot then
@@ -1883,17 +2087,18 @@ local function startPVPMode(targetPlayer)
             -- Walk to position instead of teleporting
             local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
             if humanoid then
-                humanoid.WalkSpeed = 0 -- Freeze during countdown
+                humanoid.WalkSpeed = 16
                 humanoid:MoveTo(behindPosition)
             end
             
             makeStandSpeak("Hey "..targetPlayer.Name.."! Let's 1v1!")
-            makeStandSpeak("Pick a location and say 'here'")
+            makeStandSpeak("Say 'go' to accept or 'no' to decline (10 seconds)")
         end
     elseif knife then
-        -- Murderer behavior - approach directly
+        PVP_MODE.CombatStyle = "Knife"
+        -- Approach directly for knife combat
         makeStandSpeak(targetPlayer.Name..", wanna 1v1?")
-        makeStandSpeak("Say 'here' when ready")
+        makeStandSpeak("Say 'go' to accept or 'no' to decline (10 seconds)")
     end
     
     -- Start PvP combat handler
@@ -2377,60 +2582,22 @@ local function setupChatListeners()
             respondToChat(player, message)
             processCommand(player, message)
             
-            -- Handle PvP location selection
-            if PVP_MODE.Enabled and PVP_MODE.Target and player == PVP_MODE.Target and message:lower() == "here" then
-                local targetRoot = getRoot(player.Character)
-                if targetRoot then
-                    PVP_MODE.Location = targetRoot.Position
-                    local myRoot = getRoot(localPlayer.Character)
-                    
-                    -- Find a good position away from the target
-                    local attempts = 0
-                    local foundPosition = false
-                    while attempts < 4 and not foundPosition do
-                        local direction = Vector3.new(math.random(-1, 1), 0, math.random(-1, 1)).Unit
-                        local testPos = PVP_MODE.Location + (direction * PVP_MODE.CombatDistance)
-                        
-                        -- Simple wall check (raycast)
-                        local raycastParams = RaycastParams.new()
-                        raycastParams.FilterDescendantsInstances = {localPlayer.Character}
-                        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-                        local raycastResult = workspace:Raycast(PVP_MODE.Location, direction * PVP_MODE.CombatDistance, raycastParams)
-                        
-                        if not raycastResult or not raycastResult.Instance then
-                            -- No wall hit, good position
-                            myRoot.CFrame = CFrame.new(testPos, PVP_MODE.Location)
-                            foundPosition = true
-                        end
-                        
-                        attempts = attempts + 1
+            -- Handle PvP responses
+            if PVP_MODE.Enabled and PVP_MODE.Target and player == PVP_MODE.Target then
+                local msg = message:lower()
+                if msg == "go" then
+                    PVP_MODE.WaitingForResponse = false
+                    PVP_MODE.Countdown = 3.5 -- Start countdown
+                    makeStandSpeak("Accepted! Starting in 3...")
+                elseif msg == "no" then
+                    makeStandSpeak("Aww ok ):")
+                    if PVP_MODE.CombatStyle == "Gun" then
+                        startShooting(PVP_MODE.Target)
+                    else
+                        owners = {PVP_MODE.Target}
+                        eliminatePlayers()
                     end
-                    
-                    if not foundPosition then
-                        -- Just pick any position if we can't find a good one
-                        myRoot.CFrame = CFrame.new(PVP_MODE.Location + Vector3.new(PVP_MODE.CombatDistance, 0, 0), PVP_MODE.Location)
-                    end
-                    
-                    -- Start PvP combat
-                    PVP_MODE.Countdown = 10
-                    PVP_MODE.Connection = RunService.Heartbeat:Connect(handlePVPCombat)
-                end
-            end
-            
-            -- Handle PvP decline
-            if PVP_MODE.Enabled and PVP_MODE.Target and player == PVP_MODE.Target and message:lower() == "no" then
-                makeStandSpeak("Aww ok ):")
-                stopPVPMode()
-                
-                -- Default behavior based on weapon
-                local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-                local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
-                
-                if gun then
-                    startShooting(PVP_MODE.Target)
-                elseif knife then
-                    owners = {PVP_MODE.Target}
-                    eliminatePlayers()
+                    stopPVPMode()
                 end
             end
         end)
@@ -2441,7 +2608,7 @@ local function setupChatListeners()
             respondToChat(player, message)
             processCommand(player, message)
         end)
-    end)
+    end
     
     if TextChatService then
         TextChatService.OnIncomingMessage = function(message)
