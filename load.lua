@@ -67,6 +67,7 @@ local blacklistedPlayers = {}
 local shootingTarget = nil
 local shootingConnection = nil
 local gunEquipped = false
+
 -- PvP Mode variables
 local PVP_MODE = {
     Enabled = false,
@@ -82,135 +83,8 @@ local PVP_MODE = {
     LastShotTime = 0,
     ShotCooldown = 0.5,
     LastKnifeTime = 0,
-    KnifeCooldown = 1.5,local function handlePVPCombat()
-    if not PVP_MODE.Enabled or not PVP_MODE.Target or not PVP_MODE.Target.Character then
-        stopPVPMode()
-        return
-    end
-    
-    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-    local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
-    local targetRoot = getRoot(PVP_MODE.Target.Character)
-    local myRoot = getRoot(localPlayer.Character)
-    local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
-    
-    if not targetRoot or not myRoot or not humanoid then 
-        stopPVPMode()
-        return
-    end
-    
-    -- Countdown handling (fixed to show all numbers)
-    if PVP_MODE.Countdown > 0 then
-        if math.floor(PVP_MODE.Countdown) ~= math.floor(PVP_MODE.Countdown + 0.016) then
-            makeStandSpeak(tostring(math.floor(PVP_MODE.Countdown)).."...")
-        end
-        PVP_MODE.Countdown = PVP_MODE.Countdown - 0.016
-        
-        if PVP_MODE.Countdown <= 0 then
-            makeStandSpeak("GO!")
-            PVP_MODE.Countdown = 0
-            humanoid.WalkSpeed = PVP_MODE.WalkSpeed -- Set normal walk speed when combat starts
-        else
-            humanoid.WalkSpeed = 0 -- Freeze during countdown
-            return
-        end
-    end
-    
-    -- Movement patterns for dodging
-    if os.time() - PVP_MODE.MovementChangeTime > PVP_MODE.MovementDuration then
-        PVP_MODE.CurrentMovement = PVP_MODE.MovementPatterns[math.random(1, #PVP_MODE.MovementPatterns)]
-        PVP_MODE.MovementChangeTime = os.time()
-        PVP_MODE.MovementDuration = math.random(5, 10) / 10 -- 0.5 to 1 second
-    end
-    
-    -- Calculate desired position (maintain combat distance)
-    local desiredPosition = targetRoot.Position + (targetRoot.CFrame.LookVector * -PVP_MODE.CombatDistance)
-    desiredPosition = Vector3.new(desiredPosition.X, targetRoot.Position.Y, desiredPosition.Z)
-    
-    -- Face the target
-    humanoid.AutoRotate = true
-    humanoid:MoveTo(desiredPosition)
-    
-    if gun then
-        -- Gun behavior
-        gun.Parent = localPlayer.Character
-        
-        -- Movement handling (walking, not teleporting)
-        if PVP_MODE.CurrentMovement == "Left" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.RightVector * -3))
-        elseif PVP_MODE.CurrentMovement == "Right" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.RightVector * 3))
-        elseif PVP_MODE.CurrentMovement == "Jump" then
-            humanoid.Jump = true
-        elseif PVP_MODE.CurrentMovement == "Back" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.LookVector * -3))
-        elseif PVP_MODE.CurrentMovement == "CircleLeft" then
-            local angle = os.clock() * 3
-            local offset = targetRoot.CFrame.RightVector * -math.cos(angle) * 5 + targetRoot.CFrame.LookVector * math.sin(angle) * 5
-            humanoid:MoveTo(targetRoot.Position + offset)
-        elseif PVP_MODE.CurrentMovement == "CircleRight" then
-            local angle = os.clock() * 3
-            local offset = targetRoot.CFrame.RightVector * math.cos(angle) * 5 + targetRoot.CFrame.LookVector * math.sin(angle) * 5
-            humanoid:MoveTo(targetRoot.Position + offset)
-        end
-        
-        -- Shoot at predicted position
-        if os.time() - PVP_MODE.LastShotTime > PVP_MODE.ShotCooldown then
-            local predictedPos = targetRoot.Position + (targetRoot.Velocity * 0.3) -- Prediction with velocity
-            local args = {
-                1,
-                predictedPos,
-                "AH2"
-            }
-            local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-            if remote then
-                remote:InvokeServer(unpack(args))
-            end
-            PVP_MODE.LastShotTime = os.time()
-        end
-        
-    elseif knife then
-        -- Knife behavior
-        knife.Parent = localPlayer.Character
-        
-        -- Movement handling (walking, not teleporting)
-        if PVP_MODE.CurrentMovement == "Left" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.RightVector * -4))
-        elseif PVP_MODE.CurrentMovement == "Right" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.RightVector * 4))
-        elseif PVP_MODE.CurrentMovement == "Jump" then
-            humanoid.Jump = true
-        elseif PVP_MODE.CurrentMovement == "Back" then
-            humanoid:MoveTo(desiredPosition + (targetRoot.CFrame.LookVector * -4))
-        elseif PVP_MODE.CurrentMovement == "CircleLeft" then
-            local angle = os.clock() * 3
-            local offset = targetRoot.CFrame.RightVector * -math.cos(angle) * 6 + targetRoot.CFrame.LookVector * math.sin(angle) * 6
-            humanoid:MoveTo(targetRoot.Position + offset)
-        elseif PVP_MODE.CurrentMovement == "CircleRight" then
-            local angle = os.clock() * 3
-            local offset = targetRoot.CFrame.RightVector * math.cos(angle) * 6 + targetRoot.CFrame.LookVector * math.sin(angle) * 6
-            humanoid:MoveTo(targetRoot.Position + offset)
-        end
-        
-        -- Throw knife at predicted position
-        if os.time() - PVP_MODE.LastKnifeTime > PVP_MODE.KnifeCooldown then
-            local predictedPos = targetRoot.Position + (targetRoot.Velocity * 0.4) -- Prediction with velocity
-            local args = {
-                myRoot.CFrame,
-                predictedPos
-            }
-            local remote = knife:FindFirstChild("Throw")
-            if remote then
-                remote:FireServer(unpack(args))
-            end
-            PVP_MODE.LastKnifeTime = os.time()
-        end
-    end
-end
-
-    CombatDistance = 25, -- Increased from 20 to 25
-    WalkSpeed = 16,
-    IsWalking = false
+    KnifeCooldown = 1.5,
+    CombatDistance = 20
 }
 
 -- Utility functions
@@ -1781,65 +1655,154 @@ local function processWhisper(speaker, recipient, message)
     end
 end
 
+-- PvP Mode Functions
 local function startPVPMode(targetPlayer)
     stopActiveCommand()
     activeCommand = "pvp"
     PVP_MODE.Enabled = true
     PVP_MODE.Target = targetPlayer
     PVP_MODE.Location = nil
-    PVP_MODE.Countdown = 3.5 -- Slightly longer to show all numbers
+    PVP_MODE.Countdown = 3
     PVP_MODE.CurrentMovement = nil
     PVP_MODE.MovementChangeTime = 0
     
-    -- Enable walking physics
-    local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        humanoid.WalkSpeed = 0 -- Freeze during countdown
-        humanoid.AutoRotate = true
-    end
-    
-    -- Position behind the target at proper distance
+    -- Teleport behind the target
     local targetRoot = getRoot(targetPlayer.Character)
     local myRoot = getRoot(localPlayer.Character)
     if targetRoot and myRoot then
-        local behindPosition = targetRoot.Position + (targetRoot.CFrame.LookVector * -PVP_MODE.CombatDistance)
-        behindPosition = Vector3.new(behindPosition.X, targetRoot.Position.Y, behindPosition.Z)
-        
-        -- Walk to position instead of teleporting
-        humanoid:MoveTo(behindPosition)
+        myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -PVP_MODE.CombatDistance)
         makeStandSpeak("Hey "..targetPlayer.Name.."! Let's 1v1!")
         makeStandSpeak("Pick a location and say 'here'")
     end
 end
 
--- Modified processCommandOriginal to handle PvP command
-elseif cmd == config.Prefix.."pvp" and args[2] then
-    if args[2]:lower() == "on" then
-        local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-        local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
-        
-        if gun then
-            local target = findPlayerWithTool("Knife")
-            if target then
-                startPVPMode(target)
-                whisperToPlayer(speaker, "1v1 mode activated against "..target.Name)
-            else
-                whisperToPlayer(speaker, "No murderer found for 1v1")
-            end
-        elseif knife then
-            local target = findPlayerWithTool("Gun")
-            if target then
-                startPVPMode(target)
-                whisperToPlayer(speaker, "1v1 mode activated against "..target.Name)
-            else
-                whisperToPlayer(speaker, "No sheriff found for 1v1")
-            end
-        else
-            whisperToPlayer(speaker, "You need either a gun or knife for 1v1 mode")
-        end
-    elseif args[2]:lower() == "off" then
+local function stopPVPMode()
+    PVP_MODE.Enabled = false
+    if PVP_MODE.Connection then
+        PVP_MODE.Connection:Disconnect()
+        PVP_MODE.Connection = nil
+    end
+    PVP_MODE.Target = nil
+    PVP_MODE.Location = nil
+    activeCommand = nil
+end
+
+local function handlePVPCombat()
+    if not PVP_MODE.Enabled or not PVP_MODE.Target or not PVP_MODE.Target.Character then
         stopPVPMode()
-        whisperToPlayer(speaker, "1v1 mode deactivated")
+        return
+    end
+    
+    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+    local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
+    local targetRoot = getRoot(PVP_MODE.Target.Character)
+    local myRoot = getRoot(localPlayer.Character)
+    
+    if not targetRoot or not myRoot then 
+        stopPVPMode()
+        return
+    end
+    
+    -- Countdown handling
+    if PVP_MODE.Countdown > 0 then
+        if PVP_MODE.Countdown == math.floor(PVP_MODE.Countdown) then
+            makeStandSpeak(tostring(PVP_MODE.Countdown).."...")
+        end
+        PVP_MODE.Countdown = PVP_MODE.Countdown - 0.016
+        
+        if PVP_MODE.Countdown <= 0 then
+            makeStandSpeak("GO!")
+            PVP_MODE.Countdown = 0
+        end
+        return
+    end
+    
+    -- Movement patterns for dodging
+    if os.time() - PVP_MODE.MovementChangeTime > PVP_MODE.MovementDuration then
+        PVP_MODE.CurrentMovement = PVP_MODE.MovementPatterns[math.random(1, #PVP_MODE.MovementPatterns)]
+        PVP_MODE.MovementChangeTime = os.time()
+        PVP_MODE.MovementDuration = math.random(5, 10) / 10 -- 0.5 to 1 second
+    end
+    
+    -- Face the target
+    myRoot.CFrame = CFrame.new(myRoot.Position, targetRoot.Position)
+    
+    if gun then
+        -- Gun behavior
+        gun.Parent = localPlayer.Character
+        
+        -- Dodge movement
+        if PVP_MODE.CurrentMovement == "Left" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(-1.5, 0, 0)
+        elseif PVP_MODE.CurrentMovement == "Right" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(1.5, 0, 0)
+        elseif PVP_MODE.CurrentMovement == "Jump" then
+            local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then humanoid.Jump = true end
+        elseif PVP_MODE.CurrentMovement == "Back" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -1.5)
+        elseif PVP_MODE.CurrentMovement == "CircleLeft" then
+            local angle = os.clock() * 5
+            local offset = Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+            myRoot.CFrame = CFrame.new(PVP_MODE.Location + offset, targetRoot.Position)
+        elseif PVP_MODE.CurrentMovement == "CircleRight" then
+            local angle = -os.clock() * 5
+            local offset = Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+            myRoot.CFrame = CFrame.new(PVP_MODE.Location + offset, targetRoot.Position)
+        end
+        
+        -- Shoot at predicted position
+        if os.time() - PVP_MODE.LastShotTime > PVP_MODE.ShotCooldown then
+            local predictedPos = targetRoot.Position + (targetRoot.Velocity * 0.3) -- Prediction with velocity
+            local args = {
+                1,
+                predictedPos,
+                "AH2"
+            }
+            local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+            if remote then
+                remote:InvokeServer(unpack(args))
+            end
+            PVP_MODE.LastShotTime = os.time()
+        end
+        
+    elseif knife then
+        -- Knife behavior
+        knife.Parent = localPlayer.Character
+        
+        -- Dodge movement
+        if PVP_MODE.CurrentMovement == "Left" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(-2, 0, 0)
+        elseif PVP_MODE.CurrentMovement == "Right" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(2, 0, 0)
+        elseif PVP_MODE.CurrentMovement == "Jump" then
+            local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then humanoid.Jump = true end
+        elseif PVP_MODE.CurrentMovement == "Back" then
+            myRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -2)
+        elseif PVP_MODE.CurrentMovement == "CircleLeft" then
+            local angle = os.clock() * 5
+            local offset = Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+            myRoot.CFrame = CFrame.new(PVP_MODE.Location + offset, targetRoot.Position)
+        elseif PVP_MODE.CurrentMovement == "CircleRight" then
+            local angle = -os.clock() * 5
+            local offset = Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+            myRoot.CFrame = CFrame.new(PVP_MODE.Location + offset, targetRoot.Position)
+        end
+        
+        -- Throw knife at predicted position
+        if os.time() - PVP_MODE.LastKnifeTime > PVP_MODE.KnifeCooldown then
+            local predictedPos = targetRoot.Position + (targetRoot.Velocity * 0.4) -- Prediction with velocity
+            local args = {
+                myRoot.CFrame,
+                predictedPos
+            }
+            local remote = knife:FindFirstChild("Throw")
+            if remote then
+                remote:FireServer(unpack(args))
+            end
+            PVP_MODE.LastKnifeTime = os.time()
+        end
     end
 end
 
