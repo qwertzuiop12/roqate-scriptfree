@@ -123,7 +123,7 @@ local PLAY_ROUND = {
     MovementDuration = 3,
     CurrentMovement = "Wander",
     MovementPatterns = {
-        "Wander", "CircleLeft", "CircleRight", "Pause", "JumpPattern", "Zigzag"
+        "Wander", "CircleLeft", "CircleRight", "Pause", "RandomJumps", "ZigZag"
     },
     LastPosition = nil,
     StuckTimer = 0,
@@ -150,22 +150,10 @@ local PLAY_ROUND = {
             "Is it safe here?"
         }
     },
-    -- New variables for improved behavior
-    LastJumpTime = 0,
-    JumpCooldown = 3,
-    LastWeaponCheck = 0,
-    WeaponSearchCooldown = 5,
-    LastTargetChange = 0,
-    TargetChangeCooldown = 10,
-    CurrentDestination = nil,
-    PathfindingAttempts = 0,
-    MaxPathfindingAttempts = 3,
-    AvoidanceRadius = 15,
-    CombatDistance = {
-        Murderer = 5,
-        Sheriff = 20,
-        Innocent = 30
-    }
+    MovementHistory = {},
+    MaxMovementHistory = 5,
+    LastGunCheck = 0,
+    GunCheckInterval = 5
 }
 
 -- Utility functions
@@ -362,435 +350,6 @@ local function showCommandsForRank(speaker)
         whisperToPlayer(speaker, "You don't have permission to use commands. Try !freetrial or !pricing.")
         return
     end
-local function getRandomSafePosition(minDistance, maxDistance)
-    local myRoot = getRoot(localPlayer.Character)
-    if not myRoot then return nil end
-    
-    for i = 1, 10 do
-        local angle = math.random() * math.pi * 2
-        local distance = math.random(minDistance, maxDistance)
-        local offset = Vector3.new(math.cos(angle) * distance, 0, math.sin(angle) * distance)
-        local testPos = myRoot.Position + offset
-        
-        -- Raycast down to find ground
-        local raycastParams = RaycastParams.new()
-        raycastParams.FilterDescendantsInstances = {localPlayer.Character}
-        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-        
-        local raycastResult = workspace:Raycast(testPos + Vector3.new(0,10,0), Vector3.new(0,-20,0), raycastParams)
-        if raycastResult then
-            testPos = raycastResult.Position + Vector3.new(0,3,0)
-            
-            -- Check if position is safe (not inside walls)
-            local region = Region3.new(testPos - Vector3.new(2,2,2), testPos + Vector3.new(2,2,2))
-            local parts = workspace:FindPartsInRegion3(region, nil, math.huge)
-            local safe = true
-            for _, part in ipairs(parts) do
-                if part.CanCollide and not part:IsDescendantOf(localPlayer.Character) then
-                    safe = false
-                    break
-                end
-            end
-            
-            if safe then
-                return testPos
-            end
-        end
-    end
-    return nil
-end
-
-local function findNearestGunDrop()
-    local gunDrops = {}
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj.Name == "GunDrop" then
-            table.insert(gunDrops, obj)
-        end
-    end
-    
-    if #gunDrops == 0 then return nil end
-    
-    local myRoot = getRoot(localPlayer.Character)
-    if not myRoot then return nil end
-    
-    table.sort(gunDrops, function(a, b)
-        return (a.Position - myRoot.Position).Magnitude < (b.Position - myRoot.Position).Magnitude
-    end)
-    
-    return gunDrops[1]
-end
-
-local function moveToPosition(position, humanoid)
-    if not PLAY_ROUND.Path then
-        PLAY_ROUND.Path = PathfindingService:CreatePath({
-            AgentRadius = 2,
-            AgentHeight = 5,
-            AgentCanJump = true
-        })
-    end
-
-    PLAY_ROUND.Path:ComputeAsync(getRoot(localPlayer.Character).Position, position)
-    
-    if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
-        local waypoints = PLAY_ROUND.Path:GetWaypoints()
-        if #waypoints > 1 then
-            humanoid:MoveTo(waypoints[2].Position)
-            if waypoints[2].Action == Enum.PathWaypointAction.Jump then
-                humanoid.Jump = true
-            end
-            return true
-        end
-    end
-    return false
-end
-
-local function shouldJump(humanoid)
-    if os.clock() - PLAY_ROUND.LastJumpTime < PLAY_ROUND.JumpCooldown then return false end
-    
-    -- Check if we're about to walk off a ledge
-    local root = getRoot(localPlayer.Character)
-    if not root then return false end
-    
-    local lookVector = root.CFrame.LookVector
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterDescendantsInstances = {localPlayer.Character}
-    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local raycastResult = workspace:Raycast(root.Position + (lookVector * 3) + Vector3.new(0,0.5,0), Vector3.new(0,-5,0), raycastParams)
-    if not raycastResult then
-        PLAY_ROUND.LastJumpTime = os.clock()
-        return true
-    end
-    
-    -- Random jumping for more natural movement
-    if math.random() < 0.05 then
-        PLAY_ROUND.LastJumpTime = os.clock()
-        return true
-    end
-    
-    return false
-end
-
-local function handleMurdererBehavior(humanoid, myRoot)
-    -- Find closest innocent player
-    local target = findClosestPlayerWithoutTool("Knife")
-    if not target or not target.Character then
-        -- No target found, wander
-        if os.clock() - PLAY_ROUND.LastMovementChange > PLAY_ROUND.MovementDuration then
-            PLAY_ROUND.CurrentDestination = getRandomSafePosition(10, 30)
-            PLAY_ROUND.LastMovementChange = os.clock()
-            PLAY_ROUND.MovementDuration = 2 + math.random() * 3
-        end
-        
-        if PLAY_ROUND.CurrentDestination then
-            if not moveToPosition(PLAY_ROUND.CurrentDestination, humanoid) then
-                humanoid:MoveTo(PLAY_ROUND.CurrentDestination)
-            end
-        end
-        
-        if shouldJump(humanoid) then
-            humanoid.Jump = true
-        end
-        return
-    end
-
-    local targetRoot = getRoot(target.Character)
-    if not targetRoot then return end
-
-    -- Check distance to target
-    local distance = (targetRoot.Position - myRoot.Position).Magnitude
-
-    -- Equip knife when close enough
-    local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
-    if distance < PLAY_ROUND.CombatDistance.Murderer then
-        if knife and knife.Parent ~= localPlayer.Character then
-            knife.Parent = localPlayer.Character
-        end
-
-        -- Attack if knife is equipped
-        if localPlayer.Character:FindFirstChild("Knife") then
-            -- Approach from behind
-            local behindPos = targetRoot.Position - (targetRoot.CFrame.LookVector * 2)
-            myRoot.CFrame = CFrame.new(behindPos, targetRoot.Position)
-            
-            -- Random movement pattern when attacking
-            if math.random() < 0.3 then
-                local strafeDir = math.random() < 0.5 and 1 or -1
-                myRoot.CFrame = myRoot.CFrame * CFrame.new(strafeDir * 2, 0, 0)
-            end
-            
-            simulateClick()
-            
-            -- Jump occasionally during attack
-            if math.random() < 0.2 and shouldJump(humanoid) then
-                humanoid.Jump = true
-            end
-        end
-    else
-        -- Move towards target with pathfinding
-        local approachPos = targetRoot.Position - (targetRoot.CFrame.LookVector * 3)
-        approachPos = Vector3.new(approachPos.X, targetRoot.Position.Y, approachPos.Z)
-        
-        if not moveToPosition(approachPos, humanoid) then
-            humanoid:MoveTo(approachPos)
-        end
-        
-        -- Jump over obstacles
-        if shouldJump(humanoid) then
-            humanoid.Jump = true
-        end
-    end
-end
-
-local function handleSheriffBehavior(humanoid, myRoot)
-    -- Find closest murderer
-    local target = findClosestPlayerWithTool("Knife")
-    if not target or not target.Character then
-        -- No murderer found, patrol for gun drops or wander
-        if os.clock() - PLAY_ROUND.LastWeaponCheck > PLAY_ROUND.WeaponSearchCooldown then
-            PLAY_ROUND.LastWeaponCheck = os.clock()
-            local gunDrop = findNearestGunDrop()
-            if gunDrop then
-                PLAY_ROUND.CurrentDestination = gunDrop.Position
-                PLAY_ROUND.MovementDuration = 5
-                PLAY_ROUND.LastMovementChange = os.clock()
-            end
-        end
-        
-        if not PLAY_ROUND.CurrentDestination or os.clock() - PLAY_ROUND.LastMovementChange > PLAY_ROUND.MovementDuration then
-            PLAY_ROUND.CurrentDestination = getRandomSafePosition(15, 40)
-            PLAY_ROUND.LastMovementChange = os.clock()
-            PLAY_ROUND.MovementDuration = 3 + math.random() * 4
-        end
-        
-        if PLAY_ROUND.CurrentDestination then
-            if not moveToPosition(PLAY_ROUND.CurrentDestination, humanoid) then
-                humanoid:MoveTo(PLAY_ROUND.CurrentDestination)
-            end
-        end
-        
-        if shouldJump(humanoid) then
-            humanoid.Jump = true
-        end
-        return
-    end
-
-    local targetRoot = getRoot(target.Character)
-    if not targetRoot then return end
-
-    -- Check distance to target
-    local distance = (targetRoot.Position - myRoot.Position).Magnitude
-
-    -- Equip gun when in range
-    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-    if distance < PLAY_ROUND.CombatDistance.Sheriff then
-        if gun and gun.Parent ~= localPlayer.Character then
-            gun.Parent = localPlayer.Character
-        end
-
-        -- Shoot if gun is equipped
-        if localPlayer.Character:FindFirstChild("Gun") then
-            -- Maintain optimal distance
-            if distance < 15 then
-                -- Back away while shooting
-                local retreatPos = myRoot.Position - (myRoot.CFrame.LookVector * 5)
-                humanoid:MoveTo(retreatPos)
-            elseif distance > 25 then
-                -- Close distance while shooting
-                local advancePos = myRoot.Position + (myRoot.CFrame.LookVector * 5)
-                humanoid:MoveTo(advancePos)
-            end
-            
-            -- Strafe while shooting
-            if math.random() < 0.3 then
-                local strafeDir = math.random() < 0.5 and 1 or -1
-                humanoid:MoveTo(myRoot.Position + (myRoot.CFrame.RightVector * strafeDir * 3))
-            end
-            
-            -- Jump occasionally during combat
-            if math.random() < 0.1 and shouldJump(humanoid) then
-                humanoid.Jump = true
-            end
-            
-            -- Calculate predicted position
-            local predictedPos = calculatePredictedPosition(targetRoot, "Gun")
-            myRoot.CFrame = CFrame.new(myRoot.Position, predictedPos)
-
-            local args = {
-                1,
-                predictedPos,
-                "AH2"
-            }
-            local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-            if remote then
-                remote:InvokeServer(unpack(args))
-            end
-        end
-    else
-        -- Move towards target but maintain distance
-        local approachPos = targetRoot.Position - (targetRoot.CFrame.LookVector * 20)
-        approachPos = Vector3.new(approachPos.X, targetRoot.Position.Y, approachPos.Z)
-        
-        if not moveToPosition(approachPos, humanoid) then
-            humanoid:MoveTo(approachPos)
-        end
-        
-        -- Jump over obstacles
-        if shouldJump(humanoid) then
-            humanoid.Jump = true
-        end
-    end
-end
-
-local function handleInnocentBehavior(humanoid, myRoot)
-    -- Find closest murderer to avoid
-    local murderer = findClosestPlayerWithTool("Knife")
-    if murderer and murderer.Character then
-        local murdererRoot = getRoot(murderer.Character)
-        if murdererRoot then
-            local distance = (murdererRoot.Position - myRoot.Position).Magnitude
-            
-            -- If murderer is too close, panic and run away
-            if distance < PLAY_ROUND.AvoidanceRadius then
-                local fleeDirection = (myRoot.Position - murdererRoot.Position).Unit
-                local fleePos = myRoot.Position + (fleeDirection * 30)
-                fleePos = Vector3.new(fleePos.X, myRoot.Position.Y, fleePos.Z)
-                
-                -- Add some randomness to flee path
-                fleePos = fleePos + Vector3.new(
-                    (math.random() - 0.5) * 10,
-                    0,
-                    (math.random() - 0.5) * 10
-                )
-                
-                if not moveToPosition(fleePos, humanoid) then
-                    humanoid:MoveTo(fleePos)
-                end
-                
-                -- Jump while fleeing
-                if math.random() < 0.3 and shouldJump(humanoid) then
-                    humanoid.Jump = true
-                end
-                
-                -- Occasionally look for sheriff while fleeing
-                if math.random() < 0.2 then
-                    local sheriff = findClosestPlayerWithTool("Gun")
-                    if sheriff and sheriff.Character then
-                        local sheriffRoot = getRoot(sheriff.Character)
-                        if sheriffRoot then
-                            local safePos = sheriffRoot.Position - (sheriffRoot.CFrame.LookVector * 10)
-                            PLAY_ROUND.CurrentDestination = safePos
-                            PLAY_ROUND.LastMovementChange = os.clock()
-                            PLAY_ROUND.MovementDuration = 5
-                        end
-                    end
-                end
-                
-                return
-            end
-        end
-    end
-
-    -- Find closest sheriff to follow
-    local sheriff = findClosestPlayerWithTool("Gun")
-    if sheriff and sheriff.Character then
-        local sheriffRoot = getRoot(sheriff.Character)
-        if sheriffRoot then
-            local distance = (sheriffRoot.Position - myRoot.Position).Magnitude
-            
-            -- If sheriff is found, follow at a safe distance
-            if distance > 15 then
-                local followPos = sheriffRoot.Position - (sheriffRoot.CFrame.LookVector * 10)
-                followPos = Vector3.new(followPos.X, sheriffRoot.Position.Y, followPos.Z)
-                
-                if not moveToPosition(followPos, humanoid) then
-                    humanoid:MoveTo(followPos)
-                end
-                
-                -- Jump occasionally while following
-                if math.random() < 0.1 and shouldJump(humanoid) then
-                    humanoid.Jump = true
-                end
-                return
-            end
-        end
-    end
-
-    -- No immediate threats or protectors, wander randomly
-    if os.clock() - PLAY_ROUND.LastMovementChange > PLAY_ROUND.MovementDuration then
-        PLAY_ROUND.CurrentMovement = PLAY_ROUND.MovementPatterns[math.random(1, #PLAY_ROUND.MovementPatterns)]
-        PLAY_ROUND.LastMovementChange = os.clock()
-        PLAY_ROUND.MovementDuration = 2 + math.random() * 3 -- 2 to 5 seconds
-        
-        -- Set new destination for wander
-        PLAY_ROUND.CurrentDestination = getRandomSafePosition(10, 30)
-    end
-
-    if PLAY_ROUND.CurrentMovement == "Wander" and PLAY_ROUND.CurrentDestination then
-        if not moveToPosition(PLAY_ROUND.CurrentDestination, humanoid) then
-            humanoid:MoveTo(PLAY_ROUND.CurrentDestination)
-        end
-    elseif PLAY_ROUND.CurrentMovement == "CircleLeft" then
-        local center = myRoot.Position + myRoot.CFrame.LookVector * 5
-        local angle = os.clock() * 2
-        local circlePos = center + Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
-        humanoid:MoveTo(circlePos)
-    elseif PLAY_ROUND.CurrentMovement == "CircleRight" then
-        local center = myRoot.Position + myRoot.CFrame.LookVector * 5
-        local angle = os.clock() * -2
-        local circlePos = center + Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
-        humanoid:MoveTo(circlePos)
-    elseif PLAY_ROUND.CurrentMovement == "JumpPattern" then
-        if shouldJump(humanoid) then
-            humanoid.Jump = true
-        end
-        if PLAY_ROUND.CurrentDestination then
-            humanoid:MoveTo(PLAY_ROUND.CurrentDestination)
-        end
-    elseif PLAY_ROUND.CurrentMovement == "Zigzag" then
-        local zigzag = math.sin(os.clock() * 5) * 4
-        if PLAY_ROUND.CurrentDestination then
-            local direction = (PLAY_ROUND.CurrentDestination - myRoot.Position).Unit
-            local right = myRoot.CFrame.RightVector
-            local zigzagPos = myRoot.Position + (direction * 5) + (right * zigzag)
-            humanoid:MoveTo(zigzagPos)
-        end
-    end
-    
-    -- Jump occasionally during movement
-    if math.random() < 0.1 and shouldJump(humanoid) then
-        humanoid.Jump = true
-    end
-end
-
-local function handlePlayRound()
-    if not PLAY_ROUND.Enabled or not localPlayer.Character then
-        stopPlayRound()
-        return
-    end
-
-    local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
-    local myRoot = getRoot(localPlayer.Character)
-    if not humanoid or not myRoot then return end
-
-    -- Determine role periodically
-    if os.clock() - PLAY_ROUND.LastRoleCheck > 5 then
-        PLAY_ROUND.LastRoleCheck = os.clock()
-        determineRole()
-    end
-
-    -- Chat occasionally
-    playRoundChat()
-
-    -- Execute behavior based on role
-    if PLAY_ROUND.CurrentRole == "Murderer" then
-        handleMurdererBehavior(humanoid, myRoot)
-    elseif PLAY_ROUND.CurrentRole == "Sheriff" then
-        handleSheriffBehavior(humanoid, myRoot)
-    else
-        handleInnocentBehavior(humanoid, myRoot)
-    end
-end
 
     local commands = {
         owner = {
@@ -2280,31 +1839,25 @@ local function stopPVPMode()
 end
 
 local function calculatePredictedPosition(targetRoot, weaponType)
-    -- More sophisticated prediction based on weapon type and distance
     local distance = (targetRoot.Position - getRoot(localPlayer.Character).Position).Magnitude
     local predictionTime = 0
 
     if weaponType == "Gun" then
-        -- Guns are fast, less prediction needed
         predictionTime = math.clamp(distance / 100, 0.1, 0.3) * (1 + (1 - PVP_MODE.Accuracy) * 0.5)
     else
-        -- Knives are slower, more prediction needed
         predictionTime = math.clamp(distance / 50, 0.2, 0.6) * (1 + (1 - PVP_MODE.Accuracy) * 0.8)
     end
 
-    -- Add some randomness to make it less perfect
     predictionTime = predictionTime * (0.9 + math.random() * 0.2)
 
     return targetRoot.Position + (targetRoot.Velocity * predictionTime)
 end
 
 local function isPositionSafe(position)
-    -- Check if position is safe (not inside walls, etc.)
     local raycastParams = RaycastParams.new()
     raycastParams.FilterDescendantsInstances = {localPlayer.Character}
     raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
 
-    -- Check if position is inside walls
     local region = Region3.new(position - Vector3.new(2,2,2), position + Vector3.new(2,2,2))
     local parts = workspace:FindPartsInRegion3(region, nil, math.huge)
     for _, part in ipairs(parts) do
@@ -2313,7 +1866,6 @@ local function isPositionSafe(position)
         end
     end
 
-    -- Check if position is above ground
     local raycastResult = workspace:Raycast(position, Vector3.new(0, -10, 0), raycastParams)
     if not raycastResult then
         return false
@@ -2323,7 +1875,6 @@ local function isPositionSafe(position)
 end
 
 local function findSafePositionNear(targetPosition, minDistance, maxDistance)
-    -- Try to find a safe position near the target
     for i = 1, 10 do
         local direction = Vector3.new(
             math.random() * 2 - 1,
@@ -2339,19 +1890,18 @@ local function findSafePositionNear(targetPosition, minDistance, maxDistance)
             return testPos
         end
     end
-    return targetPosition + Vector3.new(maxDistance, 0, 0) -- Fallback position
+    return targetPosition + Vector3.new(maxDistance, 0, 0)
 end
 
 local function executeMovementPattern(humanoid, targetRoot, myRoot)
     local currentTime = os.clock()
 
-    -- Change movement pattern if time elapsed or if stuck
     if currentTime - PVP_MODE.LastMovementChange > PVP_MODE.MovementDuration or 
         (PVP_MODE.LastPosition and (myRoot.Position - PVP_MODE.LastPosition).Magnitude < 1) then
 
         PVP_MODE.CurrentMovement = PVP_MODE.MovementPatterns[math.random(1, #PVP_MODE.MovementPatterns)]
         PVP_MODE.LastMovementChange = currentTime
-        PVP_MODE.MovementDuration = 0.5 + math.random() * 1.5 -- 0.5 to 2 seconds
+        PVP_MODE.MovementDuration = 0.5 + math.random() * 1.5
     end
 
     PVP_MODE.LastPosition = myRoot.Position
@@ -2360,7 +1910,6 @@ local function executeMovementPattern(humanoid, targetRoot, myRoot)
     local targetDirection = (targetRoot.Position - myRoot.Position).Unit
     local rightVector = targetRoot.CFrame.RightVector
 
-    -- Execute current movement pattern
     if PVP_MODE.CurrentMovement == "StrafeLeft" then
         desiredPosition = myRoot.Position + (-rightVector * 5 * PVP_MODE.MovementVariance)
     elseif PVP_MODE.CurrentMovement == "StrafeRight" then
@@ -2402,9 +1951,7 @@ local function executeMovementPattern(humanoid, targetRoot, myRoot)
         desiredPosition = myRoot.Position + (targetDirection * 8 * PVP_MODE.MovementVariance)
     end
 
-    -- Adjust desired position based on combat style
     if PVP_MODE.CombatStyle == "Gun" then
-        -- Prefer to maintain distance
         local distance = (targetRoot.Position - desiredPosition).Magnitude
         if distance < PVP_MODE.CombatDistance * 0.8 then
             desiredPosition = desiredPosition + (-targetDirection * 5)
@@ -2412,19 +1959,16 @@ local function executeMovementPattern(humanoid, targetRoot, myRoot)
             desiredPosition = desiredPosition + (targetDirection * 3)
         end
     else
-        -- Knife - try to close distance
         local distance = (targetRoot.Position - desiredPosition).Magnitude
         if distance > 10 then
             desiredPosition = desiredPosition + (targetDirection * 5)
         end
     end
 
-    -- Make sure desired position is safe
     if not isPositionSafe(desiredPosition) then
         desiredPosition = findSafePositionNear(myRoot.Position, 5, 10)
     end
 
-    -- Move to desired position using pathfinding
     if not PVP_MODE.Path then
         PVP_MODE.Path = PathfindingService:CreatePath({
             AgentRadius = 2,
@@ -2439,13 +1983,12 @@ local function executeMovementPattern(humanoid, targetRoot, myRoot)
         local waypoints = PVP_MODE.Path:GetWaypoints()
         if #waypoints > 1 then
             for i, waypoint in ipairs(waypoints) do
-                if i > 1 then -- Skip the first waypoint (current position)
+                if i > 1 then
                     humanoid:MoveTo(waypoint.Position)
                     if waypoint.Action == Enum.PathWaypointAction.Jump then
                         humanoid.Jump = true
                     end
 
-                    -- Wait until we reach the waypoint or get close
                     local reached = false
                     while not reached and PVP_MODE.Enabled do
                         if (myRoot.Position - waypoint.Position).Magnitude < 2 then
@@ -2458,24 +2001,19 @@ local function executeMovementPattern(humanoid, targetRoot, myRoot)
                 end
             end
         else
-            -- Direct movement if pathfinding fails
             humanoid:MoveTo(desiredPosition)
         end
     else
-        -- Fallback to direct movement if pathfinding fails
         humanoid:MoveTo(desiredPosition)
     end
 end
 
 local function handleGunCombat(humanoid, targetRoot, myRoot)
-    -- Gun combat behavior
     local gun = localPlayer.Character:FindFirstChild("Gun")
     if not gun then return end
 
-    -- Calculate predicted position with accuracy factor
     local predictedPos = calculatePredictedPosition(targetRoot, "Gun")
 
-    -- Add some inaccuracy based on the Accuracy stat
     if math.random() > PVP_MODE.Accuracy then
         predictedPos = predictedPos + Vector3.new(
             (math.random() - 0.5) * 5,
@@ -2484,7 +2022,6 @@ local function handleGunCombat(humanoid, targetRoot, myRoot)
         )
     end
 
-    -- Shoot at predicted position if cooldown is over
     if os.clock() - PVP_MODE.LastShotTime > PVP_MODE.ShotCooldown then
         local args = {
             1,
@@ -2498,22 +2035,16 @@ local function handleGunCombat(humanoid, targetRoot, myRoot)
         PVP_MODE.LastShotTime = os.clock()
     end
 
-    -- Face the target but with some randomness
-    humanoid.AutoRotate = math.random() < 0.8 -- 80% chance to face target
-
-    -- Movement patterns for gun combat
+    humanoid.AutoRotate = math.random() < 0.8
     executeMovementPattern(humanoid, targetRoot, myRoot)
 end
 
 local function handleKnifeCombat(humanoid, targetRoot, myRoot)
-    -- Knife combat behavior
     local knife = localPlayer.Character:FindFirstChild("Knife")
     if not knife then return end
 
-    -- Calculate predicted position with accuracy factor
     local predictedPos = calculatePredictedPosition(targetRoot, "Knife")
 
-    -- Throw knife at predicted position if cooldown is over
     if os.clock() - PVP_MODE.LastKnifeTime > PVP_MODE.KnifeCooldown then
         local args = {
             myRoot.CFrame,
@@ -2526,10 +2057,7 @@ local function handleKnifeCombat(humanoid, targetRoot, myRoot)
         PVP_MODE.LastKnifeTime = os.clock()
     end
 
-    -- Face the target
     humanoid.AutoRotate = true
-
-    -- Movement patterns for knife combat (more aggressive)
     executeMovementPattern(humanoid, targetRoot, myRoot)
 end
 
@@ -2548,7 +2076,6 @@ local function handlePVPCombat()
         return
     end
 
-    -- Countdown handling
     if PVP_MODE.Countdown > 0 then
         if math.floor(PVP_MODE.Countdown) ~= math.floor(PVP_MODE.Countdown + 0.016) then
             makeStandSpeak(tostring(math.floor(PVP_MODE.Countdown)).."...")
@@ -2560,12 +2087,11 @@ local function handlePVPCombat()
             PVP_MODE.Countdown = 0
             humanoid.WalkSpeed = PVP_MODE.WalkSpeed
         else
-            humanoid.WalkSpeed = 0 -- Freeze during countdown
+            humanoid.WalkSpeed = 0
             return
         end
     end
 
-    -- Check if we're waiting for response
     if PVP_MODE.WaitingForResponse then
         PVP_MODE.ResponseTimer = PVP_MODE.ResponseTimer - 0.016
         if PVP_MODE.ResponseTimer <= 0 then
@@ -2583,7 +2109,6 @@ local function handlePVPCombat()
         return
     end
 
-    -- Determine combat style based on equipped weapon
     local gun = localPlayer.Character:FindFirstChild("Gun")
     local knife = localPlayer.Character:FindFirstChild("Knife")
 
@@ -2594,7 +2119,6 @@ local function handlePVPCombat()
         PVP_MODE.CombatStyle = "Knife"
         handleKnifeCombat(humanoid, targetRoot, myRoot)
     else
-        -- No weapon equipped, try to find one
         local gunInBackpack = localPlayer.Backpack:FindFirstChild("Gun")
         local knifeInBackpack = localPlayer.Backpack:FindFirstChild("Knife")
 
@@ -2603,13 +2127,11 @@ local function handlePVPCombat()
         elseif knifeInBackpack then
             knifeInBackpack.Parent = localPlayer.Character
         else
-            -- No weapons available, try to find gun drop
             local gunDrop = findGunDrop()
             if gunDrop then
                 myRoot.CFrame = gunDrop.CFrame * CFrame.new(0, 3, 0)
                 task.wait(0.5)
             else
-                -- No weapons at all, default to knife attacks
                 owners = {PVP_MODE.Target}
                 eliminatePlayers()
                 stopPVPMode()
@@ -2617,18 +2139,14 @@ local function handlePVPCombat()
         end
     end
 
-    -- Health check and adjust behavior
     if os.clock() - PVP_MODE.LastHealthCheck > 2 then
         PVP_MODE.LastHealthCheck = os.clock()
 
-        -- Adjust behavior based on health
         local myHealth = humanoid.Health / humanoid.MaxHealth
         if myHealth < 0.5 then
-            -- More defensive when low health
             PVP_MODE.Defensiveness = math.min(0.8, PVP_MODE.Defensiveness + 0.2)
             PVP_MODE.Aggressiveness = math.max(0.2, PVP_MODE.Aggressiveness - 0.2)
         else
-            -- Reset to default behavior
             PVP_MODE.Defensiveness = 0.3
             PVP_MODE.Aggressiveness = 0.7
         end
@@ -2647,20 +2165,17 @@ local function startPVPMode(targetPlayer)
     PVP_MODE.ResponseTimer = 10
     PVP_MODE.WaitingForResponse = true
 
-    -- Check if we have a gun or knife
     local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
     local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
 
     if gun then
         PVP_MODE.CombatStyle = "Gun"
-        -- Approach from behind for gun combat
         local targetRoot = getRoot(targetPlayer.Character)
         local myRoot = getRoot(localPlayer.Character)
         if targetRoot and myRoot then
             local behindPosition = targetRoot.Position + (targetRoot.CFrame.LookVector * -PVP_MODE.CombatDistance)
             behindPosition = Vector3.new(behindPosition.X, targetRoot.Position.Y, behindPosition.Z)
 
-            -- Walk to position instead of teleporting
             local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
             if humanoid then
                 humanoid.WalkSpeed = 16
@@ -2672,20 +2187,475 @@ local function startPVPMode(targetPlayer)
         end
     elseif knife then
         PVP_MODE.CombatStyle = "Knife"
-        -- Approach directly for knife combat
         makeStandSpeak(targetPlayer.Name..", wanna 1v1?")
         makeStandSpeak("Say 'go' to accept or 'no' to decline (10 seconds)")
     end
 
-    -- Start PvP combat handler
     PVP_MODE.Connection = RunService.Heartbeat:Connect(handlePVPCombat)
 end
 
+local function getRandomMovementPattern()
+    local availablePatterns = {}
+    for _, pattern in ipairs(PLAY_ROUND.MovementPatterns) do
+        local recentlyUsed = false
+        for _, usedPattern in ipairs(PLAY_ROUND.MovementHistory) do
+            if usedPattern == pattern then
+                recentlyUsed = true
+                break
+            end
+        end
+        
+        if not recentlyUsed then
+            table.insert(availablePatterns, pattern)
+        end
+    end
+    
+    if #availablePatterns == 0 then
+        PLAY_ROUND.MovementHistory = {}
+        return PLAY_ROUND.MovementPatterns[math.random(1, #PLAY_ROUND.MovementPatterns)]
+    end
+    
+    local selectedPattern = availablePatterns[math.random(1, #availablePatterns)]
+    table.insert(PLAY_ROUND.MovementHistory, selectedPattern)
+    
+    if #PLAY_ROUND.MovementHistory > PLAY_ROUND.MaxMovementHistory then
+        table.remove(PLAY_ROUND.MovementHistory, 1)
+    end
+    
+    return selectedPattern
+end
 
+local function determineRole()
+    local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
+    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
 
+    if knife then
+        PLAY_ROUND.CurrentRole = "Murderer"
+    elseif gun then
+        PLAY_ROUND.CurrentRole = "Sheriff"
+    else
+        PLAY_ROUND.CurrentRole = "Innocent"
+    end
+end
 
+local function findClosestPlayerWithTool(toolName)
+    local closestPlayer = nil
+    local closestDistance = math.huge
+    local myRoot = getRoot(localPlayer.Character)
+    if not myRoot then return nil end
 
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer and player.Character and not blacklistedPlayers[player.Name] then
+            local targetRoot = getRoot(player.Character)
+            if targetRoot then
+                local distance = (targetRoot.Position - myRoot.Position).Magnitude
+                if distance < closestDistance then
+                    local hasTool = false
+                    if player.Character:FindFirstChild(toolName) or 
+                        (player.Backpack and player.Backpack:FindFirstChild(toolName)) then
+                        hasTool = true
+                    end
+                    if hasTool then
+                        closestPlayer = player
+                        closestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
 
+local function findClosestPlayerWithoutTool(toolName)
+    local closestPlayer = nil
+    local closestDistance = math.huge
+    local myRoot = getRoot(localPlayer.Character)
+    if not myRoot then return nil end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer and player.Character and not blacklistedPlayers[player.Name] then
+            local targetRoot = getRoot(player.Character)
+            if targetRoot then
+                local distance = (targetRoot.Position - myRoot.Position).Magnitude
+                if distance < closestDistance then
+                    local hasTool = false
+                    if player.Character:FindFirstChild(toolName) or 
+                        (player.Backpack and player.Backpack:FindFirstChild(toolName)) then
+                        hasTool = true
+                    end
+                    if not hasTool then
+                        closestPlayer = player
+                        closestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+local function findRandomSafePosition()
+    local myRoot = getRoot(localPlayer.Character)
+    if not myRoot then return nil end
+
+    for i = 1, 10 do
+        local direction = Vector3.new(
+            math.random() * 2 - 1,
+            0,
+            math.random() * 2 - 1
+        ).Unit
+
+        local distance = math.random(10, 50)
+        local testPos = myRoot.Position + (direction * distance)
+        testPos = Vector3.new(testPos.X, myRoot.Position.Y, testPos.Z)
+
+        if isPositionSafe(testPos) then
+            return testPos
+        end
+    end
+    return nil
+end
+
+local function playRoundChat()
+    if os.time() - PLAY_ROUND.LastChatTime < PLAY_ROUND.ChatCooldown then return end
+    PLAY_ROUND.LastChatTime = os.time()
+    PLAY_ROUND.ChatCooldown = math.random(10, 30)
+
+    local messages = PLAY_ROUND.ChatMessages[PLAY_ROUND.CurrentRole]
+    if messages and #messages > 0 then
+        makeStandSpeak(messages[math.random(1, #messages)])
+    end
+end
+
+local function handleMurdererBehavior(humanoid, myRoot)
+    local target = findClosestPlayerWithoutTool("Knife")
+    if not target or not target.Character then
+        local randomPos = findRandomSafePosition()
+        if randomPos then
+            humanoid:MoveTo(randomPos)
+        end
+        return
+    end
+
+    local targetRoot = getRoot(target.Character)
+    if not targetRoot then return end
+
+    local distance = (targetRoot.Position - myRoot.Position).Magnitude
+
+    local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
+    if distance < 10 then
+        if knife and knife.Parent ~= localPlayer.Character then
+            knife.Parent = localPlayer.Character
+        end
+
+        if localPlayer.Character:FindFirstChild("Knife") then
+            myRoot.CFrame = CFrame.new(targetRoot.Position - (targetRoot.CFrame.LookVector * 2), targetRoot.Position)
+            simulateClick()
+        end
+    else
+        if not PLAY_ROUND.Path then
+            PLAY_ROUND.Path = PathfindingService:CreatePath({
+                AgentRadius = 2,
+                AgentHeight = 5,
+                AgentCanJump = true
+            })
+        end
+
+        PLAY_ROUND.Path:ComputeAsync(myRoot.Position, targetRoot.Position)
+
+        if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
+            local waypoints = PLAY_ROUND.Path:GetWaypoints()
+            if #waypoints > 1 then
+                humanoid:MoveTo(waypoints[2].Position)
+                if waypoints[2].Action == Enum.PathWaypointAction.Jump then
+                    humanoid.Jump = true
+                end
+            end
+        else
+            humanoid:MoveTo(targetRoot.Position)
+        end
+    end
+end
+
+local function handleSheriffBehavior(humanoid, myRoot)
+    local target = findClosestPlayerWithTool("Knife")
+    if not target or not target.Character then
+        local randomPos = findRandomSafePosition()
+        if randomPos then
+            humanoid:MoveTo(randomPos)
+        end
+        return
+    end
+
+    local targetRoot = getRoot(target.Character)
+    if not targetRoot then return end
+
+    local distance = (targetRoot.Position - myRoot.Position).Magnitude
+
+    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
+    if distance < 20 then
+        if gun and gun.Parent ~= localPlayer.Character then
+            gun.Parent = localPlayer.Character
+        end
+
+        if localPlayer.Character:FindFirstChild("Gun") then
+            local predictedPos = calculatePredictedPosition(targetRoot, "Gun")
+            myRoot.CFrame = CFrame.new(myRoot.Position, predictedPos)
+
+            local args = {
+                1,
+                predictedPos,
+                "AH2"
+            }
+            local remote = gun:FindFirstChild("KnifeLocal") and gun.KnifeLocal:FindFirstChild("CreateBeam") and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
+            if remote then
+                remote:InvokeServer(unpack(args))
+            end
+        end
+    else
+        local approachPos = targetRoot.Position - (targetRoot.CFrame.LookVector * 15)
+        approachPos = Vector3.new(approachPos.X, targetRoot.Position.Y, approachPos.Z)
+
+        if not PLAY_ROUND.Path then
+            PLAY_ROUND.Path = PathfindingService:CreatePath({
+                AgentRadius = 2,
+                AgentHeight = 5,
+                AgentCanJump = true
+            })
+        end
+
+        PLAY_ROUND.Path:ComputeAsync(myRoot.Position, approachPos)
+
+        if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
+            local waypoints = PLAY_ROUND.Path:GetWaypoints()
+            if #waypoints > 1 then
+                humanoid:MoveTo(waypoints[2].Position)
+                if waypoints[2].Action == Enum.PathWaypointAction.Jump then
+                    humanoid.Jump = true
+                end
+            end
+        else
+            humanoid:MoveTo(approachPos)
+        end
+    end
+end
+
+local function handleInnocentBehavior(humanoid, myRoot)
+    local murderer = findClosestPlayerWithTool("Knife")
+    if murderer and murderer.Character then
+        local murdererRoot = getRoot(murderer.Character)
+        if murdererRoot then
+            local distance = (murdererRoot.Position - myRoot.Position).Magnitude
+            if distance < 30 then
+                local fleeDirection = (myRoot.Position - murdererRoot.Position).Unit
+                local fleePos = myRoot.Position + (fleeDirection * 20)
+                fleePos = Vector3.new(fleePos.X, myRoot.Position.Y, fleePos.Z)
+
+                if not PLAY_ROUND.Path then
+                    PLAY_ROUND.Path = PathfindingService:CreatePath({
+                        AgentRadius = 2,
+                        AgentHeight = 5,
+                        AgentCanJump = true
+                    })
+                end
+
+                PLAY_ROUND.Path:ComputeAsync(myRoot.Position, fleePos)
+
+                if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
+                    local waypoints = PLAY_ROUND.Path:GetWaypoints()
+                    if #waypoints > 1 then
+                        humanoid:MoveTo(waypoints[2].Position)
+                        if waypoints[2].Action == Enum.PathWaypointAction.Jump then
+                            humanoid.Jump = true
+                        end
+                    end
+                else
+                    humanoid:MoveTo(fleePos)
+                end
+                return
+            end
+        end
+    end
+
+    local sheriff = findClosestPlayerWithTool("Gun")
+    if sheriff and sheriff.Character then
+        local sheriffRoot = getRoot(sheriff.Character)
+        if sheriffRoot then
+            local distance = (sheriffRoot.Position - myRoot.Position).Magnitude
+            if distance > 15 then
+                local followPos = sheriffRoot.Position - (sheriffRoot.CFrame.LookVector * 10)
+                followPos = Vector3.new(followPos.X, sheriffRoot.Position.Y, followPos.Z)
+
+                if not PLAY_ROUND.Path then
+                    PLAY_ROUND.Path = PathfindingService:CreatePath({
+                        AgentRadius = 2,
+                        AgentHeight = 5,
+                        AgentCanJump = true
+                    })
+                end
+
+                PLAY_ROUND.Path:ComputeAsync(myRoot.Position, followPos)
+
+                if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
+                    local waypoints = PLAY_ROUND.Path:GetWaypoints()
+                    if #waypoints > 1 then
+                        humanoid:MoveTo(waypoints[2].Position)
+                        if waypoints[2].Action == Enum.PathWaypointAction.Jump then
+                            humanoid.Jump = true
+                        end
+                    end
+                else
+                    humanoid:MoveTo(followPos)
+                end
+                return
+            end
+        end
+    end
+
+    local currentTime = os.clock()
+    if currentTime - PLAY_ROUND.LastMovementChange > PLAY_ROUND.MovementDuration then
+        PLAY_ROUND.CurrentMovement = getRandomMovementPattern()
+        PLAY_ROUND.LastMovementChange = currentTime
+        PLAY_ROUND.MovementDuration = 2 + math.random() * 3
+    end
+
+    if PLAY_ROUND.CurrentMovement == "Wander" then
+        local randomPos = findRandomSafePosition()
+        if randomPos then
+            humanoid:MoveTo(randomPos)
+        end
+    elseif PLAY_ROUND.CurrentMovement == "CircleLeft" then
+        local center = myRoot.Position + myRoot.CFrame.LookVector * 5
+        local angle = currentTime * 2
+        local circlePos = center + Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+        humanoid:MoveTo(circlePos)
+    elseif PLAY_ROUND.CurrentMovement == "CircleRight" then
+        local center = myRoot.Position + myRoot.CFrame.LookVector * 5
+        local angle = currentTime * -2
+        local circlePos = center + Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+        humanoid:MoveTo(circlePos)
+    elseif PLAY_ROUND.CurrentMovement == "Pause" then
+        -- Do nothing
+    elseif PLAY_ROUND.CurrentMovement == "RandomJumps" then
+        if math.random() < 0.3 then
+            humanoid.Jump = true
+        end
+        local randomPos = findRandomSafePosition()
+        if randomPos then
+            humanoid:MoveTo(randomPos)
+        end
+    elseif PLAY_ROUND.CurrentMovement == "ZigZag" then
+        local zigzag = math.sin(currentTime * 5) * 5
+        local forwardPos = myRoot.Position + myRoot.CFrame.LookVector * 5
+        local zigzagPos = forwardPos + myRoot.CFrame.RightVector * zigzag
+        humanoid:MoveTo(zigzagPos)
+    end
+end
+
+local function checkForGunDrop()
+    if os.time() - PLAY_ROUND.LastGunCheck < PLAY_ROUND.GunCheckInterval then return nil end
+    PLAY_ROUND.LastGunCheck = os.time()
+    
+    local gunDrop = findGunDrop()
+    if not gunDrop then return nil end
+    
+    local myRoot = getRoot(localPlayer.Character)
+    if not myRoot then return nil end
+    
+    local distance = (gunDrop.Position - myRoot.Position).Magnitude
+    if distance > 50 then return nil end
+    
+    return gunDrop
+end
+
+local function handlePlayRound()
+    if not PLAY_ROUND.Enabled or not localPlayer.Character then
+        stopPlayRound()
+        return
+    end
+
+    local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
+    local myRoot = getRoot(localPlayer.Character)
+    if not humanoid or not myRoot then return end
+
+    if os.time() - PLAY_ROUND.LastRoleCheck > 5 then
+        PLAY_ROUND.LastRoleCheck = os.time()
+        determineRole()
+    end
+
+    playRoundChat()
+
+    local gunDrop = checkForGunDrop()
+    if gunDrop and PLAY_ROUND.CurrentRole ~= "Sheriff" then
+        if not PLAY_ROUND.Path then
+            PLAY_ROUND.Path = PathfindingService:CreatePath({
+                AgentRadius = 2,
+                AgentHeight = 5,
+                AgentCanJump = true
+            })
+        end
+
+        PLAY_ROUND.Path:ComputeAsync(myRoot.Position, gunDrop.Position)
+
+        if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
+            local waypoints = PLAY_ROUND.Path:GetWaypoints()
+            if #waypoints > 1 then
+                humanoid:MoveTo(waypoints[2].Position)
+                if waypoints[2].Action == Enum.PathWaypointAction.Jump then
+                    humanoid.Jump = true
+                end
+            end
+        else
+            humanoid:MoveTo(gunDrop.Position)
+        end
+        return
+    end
+
+    if PLAY_ROUND.CurrentRole == "Murderer" then
+        handleMurdererBehavior(humanoid, myRoot)
+    elseif PLAY_ROUND.CurrentRole == "Sheriff" then
+        handleSheriffBehavior(humanoid, myRoot)
+    else
+        handleInnocentBehavior(humanoid, myRoot)
+    end
+end
+
+local function startPlayRound()
+    stopActiveCommand()
+    activeCommand = "playround"
+    PLAY_ROUND.Enabled = true
+    PLAY_ROUND.LastRoleCheck = 0
+    PLAY_ROUND.LastChatTime = 0
+    PLAY_ROUND.CurrentMovement = "Wander"
+    PLAY_ROUND.LastMovementChange = 0
+    PLAY_ROUND.MovementHistory = {}
+
+    determineRole()
+    makeStandSpeak("... role: "..PLAY_ROUND.CurrentRole)
+
+    PLAY_ROUND.Connection = RunService.Heartbeat:Connect(handlePlayRound)
+end
+
+local function stopPlayRound()
+    PLAY_ROUND.Enabled = false
+    if PLAY_ROUND.Connection then
+        PLAY_ROUND.Connection:Disconnect()
+        PLAY_ROUND.Connection = nil
+    end
+    PLAY_ROUND.CurrentTarget = nil
+    if PLAY_ROUND.Path then
+        PLAY_ROUND.Path:Destroy()
+        PLAY_ROUND.Path = nil
+    end
+
+    if localPlayer.Character then
+        local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = 16
+            humanoid.AutoRotate = true
+        end
+    end
+end
 
 local function processCommandOriginal(speaker, message)
     if not message then return end
@@ -3167,18 +3137,16 @@ local function processCommand(speaker, message)
 end
 
 local function setupChatListeners()
-    -- Connect to existing players
     for _, player in ipairs(Players:GetPlayers()) do
         player.Chatted:Connect(function(message)
             respondToChat(player, message)
             processCommand(player, message)
 
-            -- Handle PvP responses
             if PVP_MODE.Enabled and PVP_MODE.Target and player == PVP_MODE.Target then
                 local msg = message:lower()
                 if msg == "go" then
                     PVP_MODE.WaitingForResponse = false
-                    PVP_MODE.Countdown = 3.5 -- Start countdown
+                    PVP_MODE.Countdown = 3.5
                     makeStandSpeak("Accepted! Starting in 3...")
                 elseif msg == "no" then
                     makeStandSpeak("Aww ok ):")
@@ -3194,7 +3162,6 @@ local function setupChatListeners()
         end)
     end
 
-    -- Connect to new players
     Players.PlayerAdded:Connect(function(player)
         player.Chatted:Connect(function(message)
             respondToChat(player, message)
@@ -3202,27 +3169,23 @@ local function setupChatListeners()
         end)
     end)
 
-    -- TextChatService connection (if available)
     if TextChatService then
         TextChatService.MessageReceived:Connect(function(message)
             if message.TextSource then
                 local speaker = Players:GetPlayerByUserId(message.TextSource.UserId)
                 if speaker then
-                    -- Check for whisper messages
                     if message.Metadata and message.Metadata["PrivateMessage"] then
                         local recipient = Players:GetPlayerByUserId(message.Metadata["PrivateMessage"].RecipientId)
                         if recipient then
                             processWhisper(speaker, recipient, message.Text)
                         end
                     end
-                    -- Process regular messages
                     respondToChat(speaker, message.Text)
                 end
             end
         end)
     end
 
-    -- Handle player leaving
     Players.PlayerRemoving:Connect(function(player)
         if hasAdminPermissions(player) then
             checkAdminLeft()
@@ -3255,4 +3218,3 @@ if localPlayer then
 else
     warn("LocalPlayer not found!")
 end
-
