@@ -103,7 +103,7 @@ local PVP_MODE = {
     StuckTimer = 0,
     LastHealthCheck = 0,
     Aggressiveness = 0.7, -- 0 to 1 (how aggressive the AI is)
-    Defensiveness = 0.3, -- 0 to 1 (how defensive the AI is)
+    Defensiveness = 0.7, -- 0 to 1 (how defensive the AI is) Was 0.3
     Accuracy = 0.85, -- 0 to 1 (shot accuracy)
     ReactionTime = 0.2, -- seconds
     MovementVariance = 0.3 -- randomness in movement patterns
@@ -123,37 +123,37 @@ local PLAY_ROUND = {
     MovementDuration = 3,
     CurrentMovement = "Wander",
     MovementPatterns = {
-        "Wander", "CircleLeft", "CircleRight", "Pause", "RandomJumps", "ZigZag"
+        "Wander", "CircleLeft", "CircleRight", "Pause", "RandomJumps", "ZigZag", "Jump"
     },
     LastPosition = nil,
     StuckTimer = 0,
     ChatMessages = {
         Murderer = {
-            "Time to hunt!",
-            "No one escapes!",
-            "You're next!",
-            "The knife chooses you!",
-            "Blood will spill!"
+            "You're not getting out of here.",
+            "Let’s see how fast you can run.",
+            "Found you.",
+            "You’re done for.",
+            "This won’t end well for you."
         },
         Sheriff = {
-            "Justice will be served!",
-            "I'll protect everyone!",
-            "The law is here!",
-            "Crime doesn't pay!",
-            "You're under arrest!"
+            "Stay behind me, I’ve got this.",
+            "Let’s catch the killer.",
+            "I won’t let anyone else get hurt.",
+            "Time to bring justice.",
+            "Alright, where are they hiding?"
         },
         Innocent = {
-            "I hope I survive!",
-            "Where's the sheriff?",
-            "Someone protect me!",
-            "I don't want to die!",
-            "Is it safe here?"
+            "Please don’t be the murderer...",
+            "Where’s the sheriff when you need them?",
+            "I’m just trying to stay alive here.",
+            "I swear it’s not me!",
+            "Can we all just chill for a sec?"
         }
     },
     MovementHistory = {},
     MaxMovementHistory = 5,
     LastGunCheck = 0,
-    GunCheckInterval = 5
+    GunCheckInterval =0.1
 }
 
 -- Utility functions
