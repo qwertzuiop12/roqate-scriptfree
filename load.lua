@@ -2824,15 +2824,45 @@ local function startPlayRound()
     stopActiveCommand()
     activeCommand = "playround"
     PLAY_ROUND.Enabled = true
-    PLAY_ROUND.LastRoleCheck = 0
-    PLAY_ROUND.LastChatTime = 0
-    PLAY_ROUND.CurrentMovement = "Wander"
-    PLAY_ROUND.LastMovementChange = 0
-
-    determineRole()
-    makeStandSpeak("... role: "..PLAY_ROUND.CurrentRole)
-
-    PLAY_ROUND.Connection = RunService.Heartbeat:Connect(handlePlayRound)
+    
+    if not localPlayer.Character then
+        warn("No character found!")
+        return
+    end
+    
+    local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        warn("No humanoid found!")
+        return
+    end
+    
+    -- Reset movement state
+    humanoid.WalkSpeed = PLAY_ROUND.MovementSpeeds.Normal
+    humanoid.AutoRotate = true
+    
+    PLAY_ROUND.Connection = RunService.Heartbeat:Connect(function()
+        if not PLAY_ROUND.Enabled or not localPlayer.Character then
+            stopPlayRound()
+            return
+        end
+        
+        determineRole() -- Update role every frame
+        
+        local success, err = pcall(function()
+            if PLAY_ROUND.CurrentRole == "Murderer" then
+                handleMurdererBehavior(humanoid, getRoot(localPlayer.Character))
+            elseif PLAY_ROUND.CurrentRole == "Sheriff" then
+                handleSheriffBehavior(humanoid, getRoot(localPlayer.Character))
+            else
+                handleInnocentBehavior(humanoid, getRoot(localPlayer.Character))
+            end
+        end)
+        
+        if not success then
+            warn("PlayRound error: "..tostring(err))
+            stopPlayRound()
+        end
+    end)
 end
 
 local function stopPlayRound()
