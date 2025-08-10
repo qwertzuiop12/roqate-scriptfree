@@ -16,7 +16,7 @@ local MOVEMENT_SMOOTHNESS = 0.1
 local PROTECTION_RADIUS = 15
 local SUS_ANIMATION_R6 = "72042024"
 local SUS_ANIMATION_R15 = "698251653"
-local STAND_ANIMATION_ID = "111189294613175"
+local STAND_ANIMATION_ID = "128381158301762"
 
 local config = {
     Prefix = ".",
@@ -3218,3 +3218,4 @@ if localPlayer then
 else
     warn("LocalPlayer not found!")
 end
+
