@@ -23,7 +23,6 @@ local config = {
     Discord = {
         WebhookURL = "https://discord.com/api/webhooks/1398448940889673880/_9Z0T6fqJtoRrkixT3NRQLUReS56kDQo1rNaMMue7jRhQYU24nyZ-itvRmZ-GiKfenuB",
         Token = "MTI1NDQ0ODQ4MTE3NTYwNTMxMw"..".GICsmx.mvjMNdkbnxMuwL4mFaYKtiQ9Y467LDOEU0Zju4",
-        ChannelID = "1398448911097794620",
         Enabled = true
     },
     AllowedPrefixes = {".", "/", "?", "!", "'", ":", ";", "@", "*", "&", "+", "_", "-", "=", "[", "{", "|", "~", "`"}
@@ -98,22 +97,22 @@ local PVP_MODE = {
     },
     ResponseTimer = 0,
     WaitingForResponse = false,
-    CombatStyle = nil, -- "Gun" or "Knife"
+    CombatStyle = nil,
     LastPosition = nil,
     StuckTimer = 0,
     LastHealthCheck = 0,
-    Aggressiveness = 0.7, -- 0 to 1 (how aggressive the AI is)
-    Defensiveness = 0.7, -- 0 to 1 (how defensive the AI is) Was 0.3
-    Accuracy = 0.85, -- 0 to 1 (shot accuracy)
-    ReactionTime = 0.2, -- seconds
-    MovementVariance = 0.3 -- randomness in movement patterns
+    Aggressiveness = 0.7,
+    Defensiveness = 0.7,
+    Accuracy = 0.85,
+    ReactionTime = 0.2,
+    MovementVariance = 0.3
 }
 
 -- PlayRound AI variables
 local PLAY_ROUND = {
     Enabled = false,
     Connection = nil,
-    CurrentRole = "Innocent", -- "Murderer", "Sheriff", "Innocent"
+    CurrentRole = "Innocent",
     CurrentTarget = nil,
     Path = nil,
     LastRoleCheck = 0,
@@ -130,33 +129,54 @@ local PLAY_ROUND = {
     ChatMessages = {
         Murderer = {
             "You're not getting out of here.",
-            "Let’s see how fast you can run.",
+            "Let's see how fast you can run.",
             "Found you.",
-            "You’re done for.",
-            "This won’t end well for you."
+            "You're done for.",
+            "This won't end well for you."
         },
         Sheriff = {
-            "Stay behind me, I’ve got this.",
-            "Let’s catch the killer.",
-            "I won’t let anyone else get hurt.",
+            "Stay behind me, I've got this.",
+            "Let's catch the killer.",
+            "I won't let anyone else get hurt.",
             "Time to bring justice.",
             "Alright, where are they hiding?"
         },
         Innocent = {
-            "Please don’t be the murderer...",
-            "Where’s the sheriff when you need them?",
-            "I’m just trying to stay alive here.",
-            "I swear it’s not me!",
+            "Please don't be the murderer...",
+            "Where's the sheriff when you need them?",
+            "I'm just trying to stay alive here.",
+            "I swear it's not me!",
             "Can we all just chill for a sec?"
         }
     },
     MovementHistory = {},
     MaxMovementHistory = 5,
     LastGunCheck = 0,
-    GunCheckInterval =0.1
+    GunCheckInterval = 0.1
 }
 
 -- Utility functions
+local function encryptToken(token)
+    local key = math.random(1, 9)
+    local encrypted = ""
+    for i = 1, #token do
+        local char = token:sub(i, i)
+        local byte = string.byte(char)
+        encrypted = encrypted .. string.char(byte + key)
+    end
+    return encrypted, key
+end
+
+local function decryptToken(encrypted, key)
+    local decrypted = ""
+    for i = 1, #encrypted do
+        local char = encrypted:sub(i, i)
+        local byte = string.byte(char)
+        decrypted = decrypted .. string.char(byte - key)
+    end
+    return decrypted
+end
+
 local function logToDiscord(message)
     if not config.Discord.Enabled or config.Discord.WebhookURL == "" then return end
 
@@ -175,6 +195,34 @@ local function logToDiscord(message)
     end
 end
 
+local function sendDiscordMessage(channelId, message)
+    local encryptedToken, key = encryptToken(config.Discord.Token)
+    local decryptedToken = decryptToken(encryptedToken, key)
+    
+    local success, err = pcall(function()
+        local headers = {
+            ["Authorization"] = "Bot " .. decryptedToken,
+            ["Content-Type"] = "application/json"
+        }
+        
+        local data = {
+            ["content"] = message
+        }
+        
+        local jsonData = HttpService:JSONEncode(data)
+        HttpService:RequestAsync({
+            Url = "https://discord.com/api/v9/channels/"..channelId.."/messages",
+            Method = "POST",
+            Headers = headers,
+            Body = jsonData
+        })
+    end)
+    
+    if not success then
+        warn("Failed to send Discord message: "..tostring(err))
+    end
+end
+
 local function logCommand(speaker, command)
     if not config.Discord.Enabled then return end
 
@@ -189,6 +237,7 @@ local function logAdminChange(admin, target, rank, action)
     local timestamp = os.date("%Y-%m-%d %H:%M:%S")
     local logMessage = string.format("[%s] %s %s %s as %s", timestamp, admin.Name, action, target, rank)
     logToDiscord(logMessage)
+    sendDiscordMessage(config.Discord.ChannelID, logMessage)
 end
 
 local function splitMessage(message, maxLength)
@@ -470,7 +519,6 @@ local function showCommandsForRank(speaker)
     local cmdList = commands[rank]
     whisperToPlayer(speaker, "Commands for "..rank..":")
 
-    -- Split commands into chunks of 5 with descriptions
     for i = 1, #cmdList, 5 do
         local chunk = {}
         for j = i, math.min(i + 4, #cmdList) do
@@ -3218,4 +3266,3 @@ if localPlayer then
 else
     warn("LocalPlayer not found!")
 end
-
