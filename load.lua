@@ -1427,20 +1427,39 @@ local function getSkinTone(humanoid)
         return "Unknown"
     end
     local skinColor = humanoid.BodyColors.HeadColor3
-    local r, g, b = skinColor.r * 255, skinColor.g * 255, skinColor.b * 255
-    if r > 240 and g > 220 and b > 200 then return "Pale White"
-    elseif r > 220 and g > 190 and b > 160 then return "Fair"
-    elseif r > 200 and g > 170 and b > 140 then return "Light"
-    elseif r > 180 and g > 150 and b > 120 then return "Medium Light"
-    elseif r > 160 and g > 130 and b > 100 then return "Medium"
-    elseif r > 140 and g > 110 and b > 80 then return "Tan"
-    elseif r > 120 and g > 90 and b > 60 then return "Brown"
-    elseif r > 100 and g > 70 and b > 40 then return "Dark Brown"
-    elseif r > 80 and g > 50 and b > 30 then return "Dark"
-    elseif r > 60 and g > 40 and b > 20 then return "Very Dark"
-    else return "Custom Color" end
+    
+    -- Convert Color3 to BrickColor
+    local brickColor = BrickColor.new(skinColor)
+    local colorName = brickColor.Name
+    
+    -- Map BrickColor names to more descriptive skin tones
+    local colorMap = {
+        ["White"] = "Pale White",
+        ["Light orange"] = "Fair",
+        ["Light yellow"] = "Fair",
+        ["Yellow"] = "Light",
+        ["Light green"] = "Light",
+        ["Green"] = "Medium Light",
+        ["Dark green"] = "Medium",
+        ["Light blue"] = "Medium",
+        ["Blue"] = "Tan",
+        ["Dark blue"] = "Tan",
+        ["Light red"] = "Light",
+        ["Red"] = "Medium",
+        ["Dark red"] = "Brown",
+        ["Brown"] = "Brown",
+        ["Dark brown"] = "Dark Brown",
+        ["Black"] = "Very Dark",
+        ["Dark grey"] = "Dark",
+        ["Grey"] = "Medium",
+        ["Light grey"] = "Light",
+        ["Institutional white"] = "Pale White",
+        ["Mid gray"] = "Medium",
+        ["Dark gray"] = "Dark"
+    }
+    
+    return colorMap[colorName] or "Custom Color ("..colorName..")"
 end
-
 local function describePlayer(targetName)
     local target = nil
     if targetName:lower() == "murd" then
