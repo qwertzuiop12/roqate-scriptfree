@@ -1600,30 +1600,30 @@ local function checkApology(speaker, message)
 end
 local function startSpyMode()
     spyEnabled = true
-    makeStandSpeak("😈")
+    makeStandSpeak("Spy mode activated! Monitoring whispers.")
 
     if spyConnection then
         spyConnection:Disconnect()
     end
 
-    spyConnection = TextChatService.MessageReceived:Connect(function(message)
-        if not message.TextSource or message.Status ~= Enum.TextChatMessageStatus.Success then
+    spyConnection = TextChatService.MessageReceived:Connect(function(msg)
+        if not msg.TextSource or msg.Status ~= Enum.TextChatMessageStatus.Success then
             return
         end
 
-        local channel = message.TextChannel
+        local channel = msg.TextChannel
         if not channel or not channel.Name:find("Whisper") then
             return
         end
 
-        local speaker = Players:GetPlayerByUserId(message.TextSource.UserId)
-        local recipient = message.Metadata and message.Metadata.TargetUserId
-            and Players:GetPlayerByUserId(message.Metadata.TargetUserId)
+        local speaker = Players:GetPlayerByUserId(msg.TextSource.UserId)
+        local recipient = msg.Metadata and msg.Metadata.TargetUserId
+            and Players:GetPlayerByUserId(msg.Metadata.TargetUserId)
 
         if speaker and recipient and not hasAdminPermissions(speaker)
            and not hasAdminPermissions(recipient)
            and speaker ~= localPlayer and recipient ~= localPlayer then
-            makeStandSpeak("[SPY] "..speaker.Name.." whispered to "..recipient.Name..": "..message.Text)
+            makeStandSpeak("[SPY] "..speaker.Name.." whispered to "..recipient.Name..": "..msg.Text)
         end
     end)
 end
