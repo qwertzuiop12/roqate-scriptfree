@@ -1438,8 +1438,12 @@ local function getSkinTone(humanoid)
     local skinColor = skinPart.BrickColor.Color
     local r, g, b = skinColor.r * 255, skinColor.g * 255, skinColor.b * 255
     
+    -- Handle extreme values first
+    if r == 0 and g == 0 and b == 0 then return "Pure Black"
+    elseif r == 255 and g == 255 and b == 255 then return "Pure White"
+    
     -- Enhanced color scale with more ranges
-    if r > 245 and g > 235 and b > 225 then return "Porcelain White"
+    elseif r > 245 and g > 235 and b > 225 then return "Porcelain White"
     elseif r > 240 and g > 220 and b > 200 then return "Pale White"
     elseif r > 230 and g > 205 and b > 180 then return "Ivory"
     elseif r > 220 and g > 190 and b > 160 then return "Fair"
@@ -1462,8 +1466,7 @@ local function getSkinTone(humanoid)
     elseif r > 50 and g > 20 and b > 0 then return "Deep Brown"
     elseif r > 40 and g > 10 and b > 0 then return "Rich Black"
     elseif r > 30 and g > 5 and b > 0 then return "Jet Black"
-    elseif r <= 30 and g <= 5 and b <= 0 then return "Pure Black"
-    else return "Custom Color" end
+    else return "Custom Color ("..math.floor(r)..","..math.floor(g)..","..math.floor(b)..")" end
 end
 
 local function describePlayer(targetName)
