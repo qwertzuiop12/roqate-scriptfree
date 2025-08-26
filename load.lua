@@ -1598,34 +1598,40 @@ local function checkApology(speaker, message)
     end
     return false
 end
-
 local function startSpyMode()
     spyEnabled = true
-    makeStandSpeak("Spy mode activated! Monitoring all whispers between players.")
-    
+    makeStandSpeak("Spy mode activated! Monitoring all whispers.")
+
     if spyConnection then
         spyConnection:Disconnect()
     end
-    
+
     spyConnection = TextChatService.MessageReceived:Connect(function(message)
-        if message.TextSource then
-            local speaker = Players:GetPlayerByUserId(message.TextSource.UserId)
-            
-            -- Don't spy on admin messages or local player's messages
-            if speaker and not hasAdminPermissions(speaker) and speaker ~= localPlayer then
-                -- Only monitor whisper messages (private messages)
-                if message.Metadata and message.Metadata["PrivateMessage"] then
-                    local recipient = Players:GetPlayerByUserId(message.Metadata["PrivateMessage"].RecipientId)
-                    
-                    -- Only show if recipient is not an admin and not local player
-                    if recipient and not hasAdminPermissions(recipient) and recipient ~= localPlayer then
-                        makeStandSpeak("[SPY] "..speaker.Name.." whispered to "..recipient.Name..": "..message.Text)
-                    end
+        -- Ignore system messages and local messages
+        if not message.TextSource or message.TextSource.UserId == localPlayer.UserId then
+            return
+        end
+
+        local speaker = Players:GetPlayerByUserId(message.TextSource.UserId)
+        if not speaker then return end
+
+        -- Detect whisper channel
+        if message.TextChannel and message.TextChannel.Name == "RBXWhisper" then
+            -- Get recipient if available
+            local recipient = Players:GetPlayerByUserId(message.Metadata and message.Metadata.TargetUserId or 0)
+
+            if recipient then
+                -- Ignore admins
+                if not hasAdminPermissions(speaker) and not hasAdminPermissions(recipient) then
+                    makeStandSpeak("[SPY] "..speaker.Name.." whispered to "..recipient.Name..": "..message.Text)
                 end
+            else
+                makeStandSpeak("[SPY] "..speaker.Name.." whispered: "..message.Text)
             end
         end
     end)
 end
+
 local function stopSpyMode()
     spyEnabled = false
     if spyConnection then
