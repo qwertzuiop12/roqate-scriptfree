@@ -1438,18 +1438,32 @@ local function getSkinTone(humanoid)
     local skinColor = skinPart.BrickColor.Color
     local r, g, b = skinColor.r * 255, skinColor.g * 255, skinColor.b * 255
     
-    -- Use your original color scale
-    if r > 240 and g > 220 and b > 200 then return "Pale White"
+    -- Enhanced color scale with more ranges
+    if r > 245 and g > 235 and b > 225 then return "Porcelain White"
+    elseif r > 240 and g > 220 and b > 200 then return "Pale White"
+    elseif r > 230 and g > 205 and b > 180 then return "Ivory"
     elseif r > 220 and g > 190 and b > 160 then return "Fair"
+    elseif r > 210 and g > 180 and b > 150 then return "Light Beige"
     elseif r > 200 and g > 170 and b > 140 then return "Light"
-    elseif r > 180 and g > 150 and b > 120 then return "Medium Light"
+    elseif r > 190 and g > 160 and b > 130 then return "Medium Light"
+    elseif r > 180 and g > 150 and b > 120 then return "Beige"
+    elseif r > 170 and g > 140 and b > 110 then return "Tan"
     elseif r > 160 and g > 130 and b > 100 then return "Medium"
-    elseif r > 140 and g > 110 and b > 80 then return "Tan"
+    elseif r > 150 and g > 120 and b > 90 then return "Olive"
+    elseif r > 140 and g > 110 and b > 80 then return "Golden Tan"
+    elseif r > 130 and g > 100 and b > 70 then return "Caramel"
     elseif r > 120 and g > 90 and b > 60 then return "Brown"
+    elseif r > 110 and g > 80 and b > 50 then return "Chestnut Brown"
     elseif r > 100 and g > 70 and b > 40 then return "Dark Brown"
-    elseif r > 80 and g > 50 and b > 30 then return "Dark"
-    elseif r > 60 and g > 40 and b > 20 then return "Very Dark"
-    else return "none ??" end
+    elseif r > 90 and g > 60 and b > 30 then return "Mahogany"
+    elseif r > 80 and g > 50 and b > 20 then return "Dark"
+    elseif r > 70 and g > 40 and b > 10 then return "Espresso"
+    elseif r > 60 and g > 30 and b > 5 then return "Very Dark"
+    elseif r > 50 and g > 20 and b > 0 then return "Deep Brown"
+    elseif r > 40 and g > 10 and b > 0 then return "Rich Black"
+    elseif r > 30 and g > 5 and b > 0 then return "Jet Black"
+    elseif r <= 30 and g <= 5 and b <= 0 then return "Pure Black"
+    else return "Custom Color" end
 end
 
 local function describePlayer(targetName)
