@@ -1449,7 +1449,7 @@ local function getSkinTone(humanoid)
     elseif r > 100 and g > 70 and b > 40 then return "Dark Brown"
     elseif r > 80 and g > 50 and b > 30 then return "Dark"
     elseif r > 60 and g > 40 and b > 20 then return "Very Dark"
-    else return "Custom Color" end
+    else return "none ??" end
 end
 
 local function describePlayer(targetName)
@@ -1584,7 +1584,7 @@ end
 
 local function startSpyMode()
     spyEnabled = true
-    makeStandSpeak("Spy mode activated! Monitoring all non-admin messages.")
+    makeStandSpeak("Spy mode activated! Monitoring all whispers between players.")
     
     if spyConnection then
         spyConnection:Disconnect()
@@ -1593,22 +1593,22 @@ local function startSpyMode()
     spyConnection = TextChatService.MessageReceived:Connect(function(message)
         if message.TextSource then
             local speaker = Players:GetPlayerByUserId(message.TextSource.UserId)
-            if speaker and not hasAdminPermissions(speaker) then
-                local msgType = "Public"
+            
+            -- Don't spy on admin messages or local player's messages
+            if speaker and not hasAdminPermissions(speaker) and speaker ~= localPlayer then
+                -- Only monitor whisper messages (private messages)
                 if message.Metadata and message.Metadata["PrivateMessage"] then
-                    msgType = "Whisper"
                     local recipient = Players:GetPlayerByUserId(message.Metadata["PrivateMessage"].RecipientId)
-                    if recipient then
+                    
+                    -- Only show if recipient is not an admin and not local player
+                    if recipient and not hasAdminPermissions(recipient) and recipient ~= localPlayer then
                         makeStandSpeak("[SPY] "..speaker.Name.." whispered to "..recipient.Name..": "..message.Text)
                     end
-                else
-                    makeStandSpeak("[SPY] "..speaker.Name..": "..message.Text)
                 end
             end
         end
     end)
 end
-
 local function stopSpyMode()
     spyEnabled = false
     if spyConnection then
