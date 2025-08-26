@@ -1600,34 +1600,21 @@ local function checkApology(speaker, message)
 end
 local function startSpyMode()
     spyEnabled = true
-    makeStandSpeak("Spy mode activated! Monitoring all whispers.")
+    makeStandSpeak("Spy mode activated—whisper monitoring active!")
 
-    if spyConnection then
-        spyConnection:Disconnect()
-    end
+    if spyConnection then spyConnection:Disconnect() end
 
-    spyConnection = TextChatService.MessageReceived:Connect(function(message)
-        -- Ignore system messages and local messages
-        if not message.TextSource or message.TextSource.UserId == localPlayer.UserId then
-            return
-        end
+    spyConnection = TextChatService.OnIncomingMessage:Connect(function(message)
+        if message.TextSource == nil or message.Status ~= Enum.TextChatMessageStatus.Success then return end
+
+        local channel = message.TextChannel
+        if not channel or not channel.Name:find("Whisper") then return end
 
         local speaker = Players:GetPlayerByUserId(message.TextSource.UserId)
-        if not speaker then return end
+        local recipient = message.Metadata and message.Metadata.TargetUserId and Players:GetPlayerByUserId(message.Metadata.TargetUserId)
 
-        -- Detect whisper channel
-        if message.TextChannel and message.TextChannel.Name == "RBXWhisper" then
-            -- Get recipient if available
-            local recipient = Players:GetPlayerByUserId(message.Metadata and message.Metadata.TargetUserId or 0)
-
-            if recipient then
-                -- Ignore admins
-                if not hasAdminPermissions(speaker) and not hasAdminPermissions(recipient) then
-                    makeStandSpeak("[SPY] "..speaker.Name.." whispered to "..recipient.Name..": "..message.Text)
-                end
-            else
-                makeStandSpeak("[SPY] "..speaker.Name.." whispered: "..message.Text)
-            end
+        if speaker and recipient and not hasAdminPermissions(speaker) and not hasAdminPermissions(recipient) and speaker ~= localPlayer and recipient ~= localPlayer then
+            makeStandSpeak("[SPY] "..speaker.Name.." whispered to "..recipient.Name..": "..message.Text)
         end
     end)
 end
