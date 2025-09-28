@@ -19,9 +19,17 @@ local SUS_ANIMATION_R15 = "698251653"
 local STAND_ANIMATION_ID = "128381158301762"
 
 local config = {
-    Prefix = ".",
+    Prefix = "/",
     AllowedPrefixes = {".", "/", "?", "!", "'", ":", ";", "@", "*", "&", "+", "_", "-", "=", "[", "{", "|", "~", "`"}
 }
+
+local FREE_TRIAL_DURATION = 300
+local freeTrialExpirations = {}
+getgenv().FreeTrial = getgenv().FreeTrial or {}
+
+local removeFreeTrialEntry
+local scheduleFreeTrialExpiration
+local ensureFreeTrialTimer
 
 -- State variables
 local owners = {}
@@ -114,7 +122,7 @@ local PLAY_ROUND = {
     Path = nil,
     LastRoleCheck = 0,
     LastChatTime = 0,
-    ChatCooldown = 10,
+    ChatCooldown = 60,
     LastMovementChange = 0,
     MovementDuration = 3,
     CurrentMovement = "Wander",
@@ -189,11 +197,25 @@ local function isAdmin(player)
 end
 
 local function isFreeTrial(player)
+    if not player then return false end
+
+    local expiration = freeTrialExpirations[player.UserId]
+    if expiration then
+        if os.time() >= expiration then
+            removeFreeTrialEntry(player.Name, player.UserId)
+            return false
+        end
+        return true
+    end
+
     for _, name in ipairs(getgenv().FreeTrial) do
         if player.Name == name or (player.DisplayName and player.DisplayName == name) then
+            freeTrialExpirations[player.UserId] = os.time() + FREE_TRIAL_DURATION
+            scheduleFreeTrialExpiration(player)
             return true
         end
     end
+
     return false
 end
 
@@ -211,22 +233,6 @@ local function checkAdminLeft()
     end
     if not anyAdmin then
         game:GetService("Players").LocalPlayer:Kick("No admins left in game")
-    end
-end
-
-local function processFreeTrial(player)
-    if isFreeTrial(player) then
-        makeStandSpeak("Thanks for redeeming! You have 5 minutes to use commands.")
-        showCommandsForRank(player)
-        task.wait(300)
-        for i = #getgenv().FreeTrial, 1, -1 do
-            if getgenv().FreeTrial[i] == player.Name then
-                table.remove(getgenv().FreeTrial, i)
-                makeStandSpeak("Your trial has expired!")
-                showPricing(player)
-                break
-            end
-        end
     end
 end
 
@@ -297,7 +303,7 @@ local function showPricing(speaker)
 end
 
 local function showCommandsForRank(speaker)
-    local rank = ""
+    local rank
     if isOwner(speaker) then
         rank = "owner"
     elseif isHeadAdmin(speaker) then
@@ -311,133 +317,122 @@ local function showCommandsForRank(speaker)
         return
     end
 
-    local commands = {
+    local summaries = {
         owner = {
-            {cmd = config.Prefix.."follow (user/murder/sheriff/random)", desc = "Follow a player"},
-            {cmd = config.Prefix.."protect (on/off)", desc = "Protect owners from others"},
-            {cmd = config.Prefix.."say (message)", desc = "Make the stand speak"},
-            {cmd = config.Prefix.."reset", desc = "Reset the stand"},
-            {cmd = config.Prefix.."hide", desc = "Hide the stand"},
-            {cmd = config.Prefix.."dismiss", desc = "Dismiss the stand"},
-            {cmd = config.Prefix.."summon", desc = "Summon the stand"},
-            {cmd = config.Prefix.."fling (all/sheriff/murder/user/random)", desc = "Fling players"},
-            {cmd = config.Prefix.."bringgun", desc = "Get the gun"},
-            {cmd = config.Prefix.."whitelist (user)", desc = "Whitelist a player"},
-            {cmd = config.Prefix.."addowner (user)", desc = "Add an owner"},
-            {cmd = config.Prefix.."addadmin (user)", desc = "Add an admin"},
-            {cmd = config.Prefix.."removeadmin (user)", desc = "Remove an admin"},
-            {cmd = config.Prefix.."sus (user/murder/sheriff/random) (speed)", desc = "Sus on a player"},
-            {cmd = config.Prefix.."stopsus", desc = "Stop sus behavior"},
-            {cmd = config.Prefix.."eliminate (random)", desc = "Eliminate players"},
-            {cmd = config.Prefix.."win (user)", desc = "Make a player win"},
-            {cmd = config.Prefix.."commands", desc = "Show commands"},
-            {cmd = config.Prefix.."disable (cmd)", desc = "Disable a command"},
-            {cmd = config.Prefix.."enable (cmd)", desc = "Enable a command"},
-            {cmd = config.Prefix.."stopcmds", desc = "Stop all active commands"},
-            {cmd = config.Prefix.."rejoin", desc = "Rejoin the game"},
-            {cmd = config.Prefix.."quit", desc = "Terminate the session"},
-            {cmd = config.Prefix.."describe (user/murd/sheriff)", desc = "Describe a player"},
-            {cmd = config.Prefix.."headadmin (user)", desc = "Add head admin"},
-            {cmd = config.Prefix.."pricing", desc = "Show pricing info"},
-            {cmd = config.Prefix.."freetrial", desc = "Get free trial"},
-            {cmd = config.Prefix.."trade (user)", desc = "Trade with player"},
-            {cmd = config.Prefix.."eliminateall", desc = "Eliminate all players"},
-            {cmd = config.Prefix.."shoot (user/murd)", desc = "Shoot a player"},
-            {cmd = config.Prefix.."spy (on/off)", desc = "Spy on player messages"},
-            {cmd = config.Prefix.."prefix (new prefix)", desc = "Change command prefix"},
-            {cmd = config.Prefix.."blacklist (user)", desc = "Blacklist a player"},
-            {cmd = config.Prefix.."pvp (on/off)", desc = "Toggle 1v1 mode"},
-            {cmd = config.Prefix.."playround (on/off)", desc = "Toggle AI play mode"}
+            "follow, protect, say, reset, dismiss, summon, fling, sus (use stopsus to stop)",
+            "bringgun, whitelist, addowner, addadmin, removeadmin, eliminate, eliminateall, win, stopcmds, rejoin, quit",
+            "describe, headadmin, pricing, freetrial, trade, shoot, spy, prefix, blacklist, pvp, playround"
         },
         headadmin = {
-            {cmd = config.Prefix.."follow (user/murder/sheriff/random)", desc = "Follow a player"},
-            {cmd = config.Prefix.."protect (on/off)", desc = "Protect owners from others"},
-            {cmd = config.Prefix.."say (message)", desc = "Make the stand speak"},
-            {cmd = config.Prefix.."reset", desc = "Reset the stand"},
-            {cmd = config.Prefix.."hide", desc = "Hide the stand"},
-            {cmd = config.Prefix.."dismiss", desc = "Dismiss the stand"},
-            {cmd = config.Prefix.."summon", desc = "Summon the stand"},
-            {cmd = config.Prefix.."fling (all/sheriff/murder/user/random)", desc = "Fling players"},
-            {cmd = config.Prefix.."bringgun", desc = "Get the gun"},
-            {cmd = config.Prefix.."whitelist (user)", desc = "Whitelist a player"},
-            {cmd = config.Prefix.."addadmin (user)", desc = "Add an admin"},
-            {cmd = config.Prefix.."sus (user/murder/sheriff/random) (speed)", desc = "Sus on a player"},
-            {cmd = config.Prefix.."stopsus", desc = "Stop sus behavior"},
-            {cmd = config.Prefix.."eliminate (random)", desc = "Eliminate players"},
-            {cmd = config.Prefix.."win (user)", desc = "Make a player win"},
-            {cmd = config.Prefix.."commands", desc = "Show commands"},
-            {cmd = config.Prefix.."stopcmds", desc = "Stop all active commands"},
-            {cmd = config.Prefix.."rejoin", desc = "Rejoin the game"},
-            {cmd = config.Prefix.."describe (user/murd/sheriff)", desc = "Describe a player"},
-            {cmd = config.Prefix.."pricing", desc = "Show pricing info"},
-            {cmd = config.Prefix.."freetrial", desc = "Get free trial"},
-            {cmd = config.Prefix.."trade (user)", desc = "Trade with player"},
-            {cmd = config.Prefix.."shoot (user/murd)", desc = "Shoot a player"},
-            {cmd = config.Prefix.."spy (on/off)", desc = "Spy on player messages"},
-            {cmd = config.Prefix.."blacklist (user)", desc = "Blacklist a player"},
-            {cmd = config.Prefix.."pvp (on/off)", desc = "Toggle 1v1 mode"},
-            {cmd = config.Prefix.."playround (on/off)", desc = "Toggle AI play mode"}
+            "follow, protect, say, reset, dismiss, summon, fling, sus (use stopsus to stop)",
+            "bringgun, whitelist, addadmin, eliminate, win, stopcmds, rejoin",
+            "describe, pricing, freetrial, trade, shoot, spy, blacklist, pvp, playround"
         },
         admin = {
-            {cmd = config.Prefix.."follow (user/murder/sheriff/random)", desc = "Follow a player"},
-            {cmd = config.Prefix.."protect (on/off)", desc = "Protect owners from others"},
-            {cmd = config.Prefix.."say (message)", desc = "Make the stand speak"},
-            {cmd = config.Prefix.."reset", desc = "Reset the stand"},
-            {cmd = config.Prefix.."hide", desc = "Hide the stand"},
-            {cmd = config.Prefix.."dismiss", desc = "Dismiss the stand"},
-            {cmd = config.Prefix.."summon", desc = "Summon the stand"},
-            {cmd = config.Prefix.."fling (all/sheriff/murder/user/random)", desc = "Fling players"},
-            {cmd = config.Prefix.."bringgun", desc = "Get the gun"},
-            {cmd = config.Prefix.."sus (user/murder/sheriff/random) (speed)", desc = "Sus on a player"},
-            {cmd = config.Prefix.."stopsus", desc = "Stop sus behavior"},
-            {cmd = config.Prefix.."eliminate (random)", desc = "Eliminate players"},
-            {cmd = config.Prefix.."win (user)", desc = "Make a player win"},
-            {cmd = config.Prefix.."commands", desc = "Show commands"},
-            {cmd = config.Prefix.."stopcmds", desc = "Stop all active commands"},
-            {cmd = config.Prefix.."describe (user/murd/sheriff)", desc = "Describe a player"},
-            {cmd = config.Prefix.."pricing", desc = "Show pricing info"},
-            {cmd = config.Prefix.."freetrial", desc = "Get free trial"},
-            {cmd = config.Prefix.."shoot (user/murd)", desc = "Shoot a player"},
-            {cmd = config.Prefix.."spy (on/off)", desc = "Spy on player messages"},
-            {cmd = config.Prefix.."pvp (on/off)", desc = "Toggle 1v1 mode"},
-            {cmd = config.Prefix.."playround (on/off)", desc = "Toggle AI play mode"}
+            "follow, protect, say, reset, dismiss, summon, fling, sus (use stopsus to stop)",
+            "bringgun, eliminate, win, stopcmds, rejoin, describe, pricing, freetrial",
+            "trade, shoot, spy, playround"
         },
         freetrial = {
-            {cmd = config.Prefix.."follow (user/murder/sheriff/random)", desc = "Follow a player"},
-            {cmd = config.Prefix.."protect (on/off)", desc = "Protect owners from others"},
-            {cmd = config.Prefix.."say (message)", desc = "Make the stand speak"},
-            {cmd = config.Prefix.."reset", desc = "Reset the stand"},
-            {cmd = config.Prefix.."hide", desc = "Hide the stand"},
-            {cmd = config.Prefix.."dismiss", desc = "Dismiss the stand"},
-            {cmd = config.Prefix.."summon", desc = "Summon the stand"},
-            {cmd = config.Prefix.."fling (all/sheriff/murder/user/random)", desc = "Fling players"},
-            {cmd = config.Prefix.."bringgun", desc = "Get the gun"},
-            {cmd = config.Prefix.."sus (user/murder/sheriff/random) (speed)", desc = "Sus on a player"},
-            {cmd = config.Prefix.."stopsus", desc = "Stop sus behavior"},
-            {cmd = config.Prefix.."eliminate (random)", desc = "Eliminate players"},
-            {cmd = config.Prefix.."win (user)", desc = "Make a player win"},
-            {cmd = config.Prefix.."commands", desc = "Show commands"},
-            {cmd = config.Prefix.."stopcmds", desc = "Stop all active commands"},
-            {cmd = config.Prefix.."describe (user/murd/sheriff)", desc = "Describe a player"},
-            {cmd = config.Prefix.."pricing", desc = "Show pricing info"},
-            {cmd = config.Prefix.."shoot (user/murd)", desc = "Shoot a player"},
-            {cmd = config.Prefix.."spy (on/off)", desc = "Spy on player messages"},
-            {cmd = config.Prefix.."pvp (on/off)", desc = "Toggle 1v1 mode"},
-            {cmd = config.Prefix.."playround (on/off)", desc = "Toggle AI play mode"}
+            "follow, protect, say, reset, dismiss, summon, fling, sus (use stopsus to stop)",
+            "pricing, freetrial, commands"
         }
     }
 
-    local cmdList = commands[rank]
-    makeStandSpeak("Commands for "..rank..":")
-
-    for i = 1, #cmdList, 5 do
-        local chunk = {}
-        for j = i, math.min(i + 4, #cmdList) do
-            table.insert(chunk, cmdList[j].cmd .. " - " .. cmdList[j].desc)
-        end
-        makeStandSpeak(table.concat(chunk, "\n"))
-        task.wait(1)
+    local lines = summaries[rank]
+    if not lines then
+        makeStandSpeak("Commands for "..rank.." are not available right now.")
+        return
     end
+
+    local label = rank:sub(1, 1):upper()..rank:sub(2)
+    makeStandSpeak(label.." commands:")
+    task.wait(0.2)
+    for _, line in ipairs(lines) do
+        makeStandSpeak(line)
+        task.wait(0.5)
+    end
+end
+
+removeFreeTrialEntry = function(playerName, userId)
+    if playerName then
+        for i = #getgenv().FreeTrial, 1, -1 do
+            if getgenv().FreeTrial[i] == playerName then
+                table.remove(getgenv().FreeTrial, i)
+            end
+        end
+    end
+    if userId then
+        freeTrialExpirations[userId] = nil
+    end
+end
+
+scheduleFreeTrialExpiration = function(player)
+    if not player then return end
+    local userId = player.UserId
+    local expiration = freeTrialExpirations[userId]
+    if not expiration then return end
+
+    task.spawn(function()
+        local trackedExpiration = expiration
+        local remaining = trackedExpiration - os.time()
+        while remaining > 0 do
+            task.wait(math.min(5, remaining))
+            if freeTrialExpirations[userId] ~= trackedExpiration then
+                return
+            end
+            remaining = trackedExpiration - os.time()
+        end
+
+        if freeTrialExpirations[userId] ~= trackedExpiration then
+            return
+        end
+
+        removeFreeTrialEntry(player.Name, userId)
+
+        local livePlayer = Players:FindFirstChild(player.Name)
+        if livePlayer then
+            makeStandSpeak("Your trial has expired!")
+            showPricing(livePlayer)
+        else
+            makeStandSpeak(player.Name.."'s free trial expired.")
+        end
+    end)
+end
+
+ensureFreeTrialTimer = function(player)
+    if not player then return end
+    local userId = player.UserId
+    if freeTrialExpirations[userId] then return end
+
+    for _, name in ipairs(getgenv().FreeTrial) do
+        if name == player.Name or (player.DisplayName and player.DisplayName == name) then
+            freeTrialExpirations[userId] = os.time() + FREE_TRIAL_DURATION
+            scheduleFreeTrialExpiration(player)
+            break
+        end
+    end
+end
+
+local function processFreeTrial(player)
+    if not player then return end
+
+    freeTrialExpirations[player.UserId] = os.time() + FREE_TRIAL_DURATION
+
+    local found = false
+    for _, name in ipairs(getgenv().FreeTrial) do
+        if name == player.Name then
+            found = true
+            break
+        end
+    end
+    if not found then
+        table.insert(getgenv().FreeTrial, player.Name)
+    end
+
+    makeStandSpeak("Thanks for redeeming! You have 5 minutes to use commands.")
+    showCommandsForRank(player)
+    scheduleFreeTrialExpiration(player)
 end
 
 local function checkCommandPermissions(speaker, cmd)
@@ -1816,9 +1811,9 @@ local function respondToChat(speaker, message)
                             names = names .. ", "
                         end
                     end
-                    return "Murderer: " .. names .. "!"
+                    return "Murderer is " .. names .. "!"
                 else
-                    return "No murderer found..."
+                    return "It could be me... Maybe not?"
                 end
             end
         },
@@ -1837,9 +1832,9 @@ local function respondToChat(speaker, message)
                             names = names .. ", "
                         end
                     end
-                    return "Sheriff: " .. names .. "!"
+                    return "Sheriff is " .. names .. "!"
                 else
-                    return "No law around here!"
+                    return "I think the gun is dropped..."
                 end
             end
         },
@@ -2235,49 +2230,98 @@ local function handlePVPCombat()
     end
 end
 
-local function startPVPMode(targetPlayer)
+local function getAvailableWeapon()
+    if not localPlayer.Character then return nil end
+    local char = localPlayer.Character
+    local backpack = localPlayer:FindFirstChild("Backpack")
+
+    local gun = char:FindFirstChild("Gun")
+    if gun then return "Gun", gun end
+
+    local knife = char:FindFirstChild("Knife")
+    if knife then return "Knife", knife end
+
+    if backpack then
+        gun = backpack:FindFirstChild("Gun")
+        if gun then return "Gun", gun end
+        knife = backpack:FindFirstChild("Knife")
+        if knife then return "Knife", knife end
+    end
+
+    return nil
+end
+
+local function startPVPMode()
     stopActiveCommand()
+
+    local weaponType, weaponInstance = getAvailableWeapon()
+    if not weaponType or not weaponInstance then
+        makeStandSpeak("Equip a gun or knife before starting 1v1.")
+        return false
+    end
+
+    local targetTool = weaponType == "Gun" and "Knife" or "Gun"
+    local targetPlayer = findPlayerWithTool(targetTool)
+    if not targetPlayer or not targetPlayer.Character then
+        local missingRole = targetTool == "Gun" and "sheriff" or "murderer"
+        makeStandSpeak("No "..missingRole.." found for 1v1 right now.")
+        return false
+    end
+
+    local myRoot = getRoot(localPlayer.Character)
+    local targetRoot = getRoot(targetPlayer.Character)
+    if not myRoot or not targetRoot then
+        makeStandSpeak("Can't find a good spot for the duel right now.")
+        return false
+    end
+
+    if weaponInstance.Parent ~= localPlayer.Character then
+        weaponInstance.Parent = localPlayer.Character
+    end
+
+    local duelPosition = targetRoot.Position + (-targetRoot.CFrame.LookVector * 100)
+    if not isPositionSafe(duelPosition) then
+        duelPosition = findSafePositionNear(targetRoot.Position, 90, 110)
+    end
+    if not duelPosition then
+        duelPosition = targetRoot.Position + Vector3.new(0, 0, -100)
+    end
+    if duelPosition then
+        myRoot.CFrame = CFrame.new(duelPosition, targetRoot.Position)
+    end
+
     activeCommand = "pvp"
     PVP_MODE.Enabled = true
     PVP_MODE.Target = targetPlayer
-    PVP_MODE.Location = nil
-    PVP_MODE.Countdown = 0
+    PVP_MODE.Location = duelPosition or targetRoot.Position
+    PVP_MODE.Countdown = 4
     PVP_MODE.CurrentMovement = nil
     PVP_MODE.LastMovementChange = 0
-    PVP_MODE.ResponseTimer = 10
-    PVP_MODE.WaitingForResponse = true
+    PVP_MODE.ResponseTimer = 0
+    PVP_MODE.WaitingForResponse = false
+    PVP_MODE.CombatStyle = weaponType
+    PVP_MODE.LastShotTime = 0
+    PVP_MODE.LastKnifeTime = 0
+    PVP_MODE.LastHealthCheck = os.clock()
 
-    local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
-    local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
-
-    if gun then
-        PVP_MODE.CombatStyle = "Gun"
-        local targetRoot = getRoot(targetPlayer.Character)
-        local myRoot = getRoot(localPlayer.Character)
-        if targetRoot and myRoot then
-            local behindPosition = targetRoot.Position + (targetRoot.CFrame.LookVector * -PVP_MODE.CombatDistance)
-            behindPosition = Vector3.new(behindPosition.X, targetRoot.Position.Y, behindPosition.Z)
-
-            local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid.WalkSpeed = 16
-                humanoid:MoveTo(behindPosition)
-            end
-
-            makeStandSpeak("Hey "..targetPlayer.Name.."! Let's 1v1!")
-            makeStandSpeak("Say 'go' to accept or 'no' to decline (10 seconds)")
-        end
-    elseif knife then
-        PVP_MODE.CombatStyle = "Knife"
-        makeStandSpeak(targetPlayer.Name..", wanna 1v1?")
-        makeStandSpeak("Say 'go' to accept or 'no' to decline (10 seconds)")
-    else
-        makeStandSpeak("I need a weapon to 1v1!")
-        stopPVPMode()
-        return
+    if PVP_MODE.Path then
+        PVP_MODE.Path:Destroy()
+        PVP_MODE.Path = nil
+    end
+    if PVP_MODE.Connection then
+        PVP_MODE.Connection:Disconnect()
     end
 
+    local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        PVP_MODE.WalkSpeed = humanoid.WalkSpeed
+        humanoid.WalkSpeed = 0
+    end
+
+    makeStandSpeak("1v1 mode activated against "..targetPlayer.Name..". Starting in a moment!")
+
     PVP_MODE.Connection = RunService.Heartbeat:Connect(handlePVPCombat)
+    return true
 end
 
 local function getRandomMovementPattern()
@@ -3165,27 +3209,10 @@ local function processCommandOriginal(speaker, message)
         config.Prefix = newPrefix
         makeStandSpeak("Command prefix changed to: "..newPrefix)
     elseif cmd == config.Prefix.."pvp" and args[2] then
-        if args[2]:lower() == "on" then
-            local targetName = args[3] and args[3]:lower() or "random"
-            local target = nil
-            
-            if targetName == "murder" then
-                target = findPlayerWithTool("Knife")
-            elseif targetName == "sheriff" then
-                target = findPlayerWithTool("Gun")
-            elseif targetName == "random" then
-                target = getRandomPlayer()
-            else
-                target = findTarget(table.concat(args, " ", 3))
-            end
-            
-            if target then
-                startPVPMode(target)
-                makeStandSpeak("1v1 mode activated against "..target.Name)
-            else
-                makeStandSpeak("Target not found for 1v1")
-            end
-        elseif args[2]:lower() == "off" then
+        local toggle = args[2]:lower()
+        if toggle == "on" then
+            startPVPMode()
+        elseif toggle == "off" then
             stopPVPMode()
             makeStandSpeak("1v1 mode deactivated")
         end
@@ -3217,12 +3244,9 @@ local function processCommand(speaker, message)
                 return
             end
             if not isFreeTrial(speaker) then
-                table.insert(getgenv().FreeTrial, speaker.Name)
-                makeStandSpeak("Thanks for redeeming free trial! You have 5 minutes to use commands.")
-                showCommandsForRank(speaker)
-                spawn(function() processFreeTrial(speaker) end)
+                processFreeTrial(speaker)
             else
-                makeStandSpeak("You already have an active free trial")
+                makeStandSpeak("You already have an active free trial!")
             end
             return
         elseif cmd == "!checkrole" then
