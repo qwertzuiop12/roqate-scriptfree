@@ -123,6 +123,7 @@ local PLAY_ROUND = {
     },
     LastPosition = nil,
     StuckTimer = 0,
+    LastStuckCheck = 0,
     ChatMessages = {
         Murderer = {
             "You're not getting out of here.",
@@ -156,7 +157,8 @@ local PLAY_ROUND = {
     LastPathCompute = 0,
     RepathCooldown = 0.6,
     MoveConnection = nil,
-    MoveConnectionHumanoid = nil
+    MoveConnectionHumanoid = nil,
+    PathBlockedConnection = nil
 }
 
 -- Utility functions
@@ -2351,6 +2353,9 @@ local function findClosestPlayerWithTool(toolName)
     return closestPlayer
 end
 
+local resetPlayRoundPathState
+local findRandomSafePosition
+
 local function ensurePlayRoundPath()
     if not PLAY_ROUND.Path then
         PLAY_ROUND.Path = PathfindingService:CreatePath({
@@ -2359,11 +2364,17 @@ local function ensurePlayRoundPath()
             AgentCanJump = true,
             AgentCanClimb = true
         })
+        if PLAY_ROUND.PathBlockedConnection then
+            PLAY_ROUND.PathBlockedConnection:Disconnect()
+        end
+        PLAY_ROUND.PathBlockedConnection = PLAY_ROUND.Path.Blocked:Connect(function()
+            resetPlayRoundPathState()
+        end)
     end
     return PLAY_ROUND.Path
 end
 
-local function resetPlayRoundPathState()
+resetPlayRoundPathState = function()
     PLAY_ROUND.Waypoints = nil
     PLAY_ROUND.WaypointIndex = 0
     PLAY_ROUND.LastDestination = nil
@@ -2436,11 +2447,27 @@ local function moveHumanoidAlongPath(humanoid, destination)
             humanoid:MoveTo(firstWaypoint.Position)
         else
             resetPlayRoundPathState()
-            humanoid:MoveTo(destination)
+            local fallback = findSafePositionNear(destination, 5, 15)
+            if fallback then
+                humanoid:MoveTo(fallback)
+            else
+                local randomPos = findRandomSafePosition()
+                if randomPos then
+                    humanoid:MoveTo(randomPos)
+                end
+            end
         end
     else
         resetPlayRoundPathState()
-        humanoid:MoveTo(destination)
+        local fallback = findSafePositionNear(destination, 5, 15)
+        if fallback then
+            humanoid:MoveTo(fallback)
+        else
+            local randomPos = findRandomSafePosition()
+            if randomPos then
+                humanoid:MoveTo(randomPos)
+            end
+        end
     end
 end
 
@@ -2472,7 +2499,7 @@ local function findClosestPlayerWithoutTool(toolName)
     return closestPlayer
 end
 
-local function findRandomSafePosition()
+findRandomSafePosition = function()
     local myRoot = getRoot(localPlayer.Character)
     if not myRoot then return nil end
 
@@ -2573,7 +2600,7 @@ local function handleSheriffBehavior(humanoid, myRoot)
             end
         end
     else
-        local approachPos = targetRoot.Position - (targetRoot.CFrame.LookVector * 15)
+        local approachPos = findSafePositionNear(targetRoot.Position, 8, 18) or (targetRoot.Position - (targetRoot.CFrame.LookVector * 12))
         moveHumanoidAlongPath(humanoid, approachPos)
     end
 end
@@ -2603,7 +2630,7 @@ local function handleInnocentBehavior(humanoid, myRoot)
         if sheriffRoot then
             local distance = (sheriffRoot.Position - myRoot.Position).Magnitude
             if distance > 25 then
-                local followPos = sheriffRoot.Position - (sheriffRoot.CFrame.LookVector * 12)
+                local followPos = findSafePositionNear(sheriffRoot.Position, 6, 14) or (sheriffRoot.Position - (sheriffRoot.CFrame.LookVector * 12))
                 moveHumanoidAlongPath(humanoid, followPos)
                 return
             end
@@ -2679,6 +2706,30 @@ local function handlePlayRound()
     local myRoot = getRoot(localPlayer.Character)
     if not humanoid or not myRoot then return end
 
+    local now = tick()
+    if PLAY_ROUND.LastStuckCheck == 0 then
+        PLAY_ROUND.LastStuckCheck = now
+    end
+
+    if PLAY_ROUND.LastPosition then
+        local distanceMoved = (myRoot.Position - PLAY_ROUND.LastPosition).Magnitude
+        if distanceMoved < 0.75 then
+            PLAY_ROUND.StuckTimer = PLAY_ROUND.StuckTimer + (now - PLAY_ROUND.LastStuckCheck)
+        else
+            PLAY_ROUND.StuckTimer = 0
+        end
+    else
+        PLAY_ROUND.StuckTimer = 0
+    end
+
+    PLAY_ROUND.LastStuckCheck = now
+    PLAY_ROUND.LastPosition = myRoot.Position
+
+    if PLAY_ROUND.StuckTimer > 1.5 then
+        resetPlayRoundPathState()
+        PLAY_ROUND.StuckTimer = 0
+    end
+
     if os.time() - PLAY_ROUND.LastRoleCheck > 5 then
         PLAY_ROUND.LastRoleCheck = os.time()
         determineRole()
@@ -2712,11 +2763,18 @@ local function startPlayRound()
     PLAY_ROUND.MovementHistory = {}
     resetPlayRoundPathState()
     PLAY_ROUND.LastPathCompute = 0
+    PLAY_ROUND.LastPosition = nil
+    PLAY_ROUND.StuckTimer = 0
+    PLAY_ROUND.LastStuckCheck = 0
     if PLAY_ROUND.MoveConnection then
         PLAY_ROUND.MoveConnection:Disconnect()
         PLAY_ROUND.MoveConnection = nil
     end
     PLAY_ROUND.MoveConnectionHumanoid = nil
+    if PLAY_ROUND.PathBlockedConnection then
+        PLAY_ROUND.PathBlockedConnection:Disconnect()
+        PLAY_ROUND.PathBlockedConnection = nil
+    end
 
     determineRole()
     makeStandSpeak("... role: "..PLAY_ROUND.CurrentRole)
@@ -2751,10 +2809,17 @@ local function stopPlayRound()
         PLAY_ROUND.MoveConnection = nil
     end
     PLAY_ROUND.MoveConnectionHumanoid = nil
+    if PLAY_ROUND.PathBlockedConnection then
+        PLAY_ROUND.PathBlockedConnection:Disconnect()
+        PLAY_ROUND.PathBlockedConnection = nil
+    end
     if PLAY_ROUND.Path then
         PLAY_ROUND.Path:Destroy()
         PLAY_ROUND.Path = nil
     end
+    PLAY_ROUND.LastPosition = nil
+    PLAY_ROUND.StuckTimer = 0
+    PLAY_ROUND.LastStuckCheck = 0
 
     if localPlayer.Character then
         local humanoid = localPlayer.Character:FindFirstChildOfClass("Humanoid")
