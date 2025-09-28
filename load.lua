@@ -149,7 +149,14 @@ local PLAY_ROUND = {
     MovementHistory = {},
     MaxMovementHistory = 5,
     LastGunCheck = 0,
-    GunCheckInterval = 0.1
+    GunCheckInterval = 0.1,
+    Waypoints = nil,
+    WaypointIndex = 0,
+    LastDestination = nil,
+    LastPathCompute = 0,
+    RepathCooldown = 0.6,
+    MoveConnection = nil,
+    MoveConnectionHumanoid = nil
 }
 
 -- Utility functions
@@ -1607,24 +1614,90 @@ local function startSpyMode()
     end
 
     spyConnection = TextChatService.MessageReceived:Connect(function(msg)
+        if not spyEnabled then return end
         if not msg.TextSource or msg.Status ~= Enum.TextChatMessageStatus.Success then
             return
         end
 
-        local channel = msg.TextChannel
-        if not channel or not channel.Name:find("Whisper") then
+        local speaker = Players:GetPlayerByUserId(msg.TextSource.UserId)
+        if not speaker then
             return
         end
 
-        local speaker = Players:GetPlayerByUserId(msg.TextSource.UserId)
-        local recipient = msg.Metadata and msg.Metadata.TargetUserId
-            and Players:GetPlayerByUserId(msg.Metadata.TargetUserId)
+        local metadata = msg.Metadata or {}
+        local channel = msg.TextChannel
+        local channelName = channel and channel.Name or ""
+        local channelType = channel and channel.Type
 
-        if speaker and recipient and not hasAdminPermissions(speaker)
-           and not hasAdminPermissions(recipient)
-           and speaker ~= localPlayer and recipient ~= localPlayer then
-            makeStandSpeak("[SPY] "..speaker.Name.." whispered to "..recipient.Name..": "..msg.Text)
+        local privateInfo = metadata.PrivateMessage or metadata["PrivateMessage"]
+        local targetUserId = metadata.TargetUserId or metadata.RecipientId or metadata.ToUserId
+
+        if privateInfo then
+            targetUserId = targetUserId or privateInfo.RecipientId or privateInfo.TargetUserId or privateInfo.UserId
         end
+
+        local recipient = nil
+        if targetUserId then
+            recipient = Players:GetPlayerByUserId(targetUserId)
+        end
+
+        local recipientName
+        if privateInfo then
+            if privateInfo.RecipientName then
+                recipientName = privateInfo.RecipientName
+            elseif privateInfo.TargetName then
+                recipientName = privateInfo.TargetName
+            elseif privateInfo.Name then
+                recipientName = privateInfo.Name
+            elseif privateInfo.Recipients and type(privateInfo.Recipients) == "table" then
+                local names = {}
+                for _, id in ipairs(privateInfo.Recipients) do
+                    local playerRecipient = Players:GetPlayerByUserId(id)
+                    if playerRecipient then
+                        table.insert(names, playerRecipient.Name)
+                    end
+                end
+                if #names > 0 then
+                    recipientName = table.concat(names, ", ")
+                end
+            end
+        end
+
+        if recipient and not recipientName then
+            recipientName = recipient.Name
+        end
+
+        local isHiddenChannel = false
+        if privateInfo then
+            isHiddenChannel = true
+        elseif channelType == Enum.TextChannelType.Private or channelType == Enum.TextChannelType.Team then
+            isHiddenChannel = true
+        elseif channelName ~= "" then
+            local lowerName = channelName:lower()
+            if lowerName:find("whisper") or lowerName:find("private") or lowerName:find("team") then
+                isHiddenChannel = true
+            end
+        end
+
+        if not isHiddenChannel then
+            return
+        end
+
+        if hasAdminPermissions(speaker) then
+            return
+        end
+
+        if recipient and hasAdminPermissions(recipient) then
+            return
+        end
+
+        if speaker == localPlayer or recipient == localPlayer then
+            return
+        end
+
+        local label = recipientName or (channelName ~= "" and channelName) or "hidden channel"
+
+        makeStandSpeak("[SPY] "..speaker.Name.." -> "..label..": "..msg.Text)
     end)
 end
 
@@ -2278,6 +2351,99 @@ local function findClosestPlayerWithTool(toolName)
     return closestPlayer
 end
 
+local function ensurePlayRoundPath()
+    if not PLAY_ROUND.Path then
+        PLAY_ROUND.Path = PathfindingService:CreatePath({
+            AgentRadius = 2,
+            AgentHeight = 5,
+            AgentCanJump = true,
+            AgentCanClimb = true
+        })
+    end
+    return PLAY_ROUND.Path
+end
+
+local function resetPlayRoundPathState()
+    PLAY_ROUND.Waypoints = nil
+    PLAY_ROUND.WaypointIndex = 0
+    PLAY_ROUND.LastDestination = nil
+    PLAY_ROUND.LastPathCompute = 0
+end
+
+local function ensurePlayRoundMoveConnection(humanoid)
+    if not humanoid then return end
+
+    if PLAY_ROUND.MoveConnectionHumanoid ~= humanoid then
+        if PLAY_ROUND.MoveConnection then
+            PLAY_ROUND.MoveConnection:Disconnect()
+        end
+
+        PLAY_ROUND.MoveConnection = humanoid.MoveToFinished:Connect(function(reached)
+            if not PLAY_ROUND.Waypoints then
+                return
+            end
+
+            if not reached then
+                PLAY_ROUND.LastPathCompute = 0
+                resetPlayRoundPathState()
+                return
+            end
+
+            PLAY_ROUND.WaypointIndex += 1
+            local nextWaypoint = PLAY_ROUND.Waypoints[PLAY_ROUND.WaypointIndex]
+            if nextWaypoint then
+                if nextWaypoint.Action == Enum.PathWaypointAction.Jump then
+                    humanoid.Jump = true
+                end
+                humanoid:MoveTo(nextWaypoint.Position)
+            else
+                resetPlayRoundPathState()
+            end
+        end)
+
+        PLAY_ROUND.MoveConnectionHumanoid = humanoid
+    end
+end
+
+local function moveHumanoidAlongPath(humanoid, destination)
+    if not humanoid or not destination then return end
+
+    local myRoot = getRoot(localPlayer.Character)
+    if not myRoot then return end
+
+    ensurePlayRoundMoveConnection(humanoid)
+
+    local sameDestination = PLAY_ROUND.LastDestination and (destination - PLAY_ROUND.LastDestination).Magnitude < 2
+    if sameDestination and PLAY_ROUND.Waypoints and tick() - PLAY_ROUND.LastPathCompute < PLAY_ROUND.RepathCooldown then
+        return
+    end
+
+    local path = ensurePlayRoundPath()
+    PLAY_ROUND.LastPathCompute = tick()
+    path:ComputeAsync(myRoot.Position, destination)
+
+    if path.Status == Enum.PathStatus.Success then
+        local waypoints = path:GetWaypoints()
+        if #waypoints > 1 then
+            PLAY_ROUND.Waypoints = waypoints
+            PLAY_ROUND.WaypointIndex = 2
+            PLAY_ROUND.LastDestination = destination
+
+            local firstWaypoint = waypoints[2]
+            if firstWaypoint.Action == Enum.PathWaypointAction.Jump then
+                humanoid.Jump = true
+            end
+            humanoid:MoveTo(firstWaypoint.Position)
+        else
+            resetPlayRoundPathState()
+            humanoid:MoveTo(destination)
+        end
+    else
+        resetPlayRoundPathState()
+        humanoid:MoveTo(destination)
+    end
+end
+
 local function findClosestPlayerWithoutTool(toolName)
     local closestPlayer = nil
     local closestDistance = math.huge
@@ -2344,7 +2510,7 @@ local function handleMurdererBehavior(humanoid, myRoot)
     if not target or not target.Character then
         local randomPos = findRandomSafePosition()
         if randomPos then
-            humanoid:MoveTo(randomPos)
+            moveHumanoidAlongPath(humanoid, randomPos)
         end
         return
     end
@@ -2356,6 +2522,7 @@ local function handleMurdererBehavior(humanoid, myRoot)
 
     local knife = localPlayer.Backpack:FindFirstChild("Knife") or localPlayer.Character:FindFirstChild("Knife")
     if distance < 10 then
+        resetPlayRoundPathState()
         if knife and knife.Parent ~= localPlayer.Character then
             knife.Parent = localPlayer.Character
         end
@@ -2365,27 +2532,7 @@ local function handleMurdererBehavior(humanoid, myRoot)
             simulateClick()
         end
     else
-        if not PLAY_ROUND.Path then
-            PLAY_ROUND.Path = PathfindingService:CreatePath({
-                AgentRadius = 2,
-                AgentHeight = 5,
-                AgentCanJump = true
-            })
-        end
-
-        PLAY_ROUND.Path:ComputeAsync(myRoot.Position, targetRoot.Position)
-
-        if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
-            local waypoints = PLAY_ROUND.Path:GetWaypoints()
-            if #waypoints > 1 then
-                humanoid:MoveTo(waypoints[2].Position)
-                if waypoints[2].Action == Enum.PathWaypointAction.Jump then
-                    humanoid.Jump = true
-                end
-            end
-        else
-            humanoid:MoveTo(targetRoot.Position)
-        end
+        moveHumanoidAlongPath(humanoid, targetRoot.Position)
     end
 end
 
@@ -2394,7 +2541,7 @@ local function handleSheriffBehavior(humanoid, myRoot)
     if not target or not target.Character then
         local randomPos = findRandomSafePosition()
         if randomPos then
-            humanoid:MoveTo(randomPos)
+            moveHumanoidAlongPath(humanoid, randomPos)
         end
         return
     end
@@ -2406,6 +2553,7 @@ local function handleSheriffBehavior(humanoid, myRoot)
 
     local gun = localPlayer.Backpack:FindFirstChild("Gun") or localPlayer.Character:FindFirstChild("Gun")
     if distance < 20 then
+        resetPlayRoundPathState()
         if gun and gun.Parent ~= localPlayer.Character then
             gun.Parent = localPlayer.Character
         end
@@ -2426,29 +2574,7 @@ local function handleSheriffBehavior(humanoid, myRoot)
         end
     else
         local approachPos = targetRoot.Position - (targetRoot.CFrame.LookVector * 15)
-        approachPos = Vector3.new(approachPos.X, targetRoot.Position.Y, approachPos.Z)
-
-        if not PLAY_ROUND.Path then
-            PLAY_ROUND.Path = PathfindingService:CreatePath({
-                AgentRadius = 2,
-                AgentHeight = 5,
-                AgentCanJump = true
-            })
-        end
-
-        PLAY_ROUND.Path:ComputeAsync(myRoot.Position, approachPos)
-
-        if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
-            local waypoints = PLAY_ROUND.Path:GetWaypoints()
-            if #waypoints > 1 then
-                humanoid:MoveTo(waypoints[2].Position)
-                if waypoints[2].Action == Enum.PathWaypointAction.Jump then
-                    humanoid.Jump = true
-                end
-            end
-        else
-            humanoid:MoveTo(approachPos)
-        end
+        moveHumanoidAlongPath(humanoid, approachPos)
     end
 end
 
@@ -2458,31 +2584,13 @@ local function handleInnocentBehavior(humanoid, myRoot)
         local murdererRoot = getRoot(murderer.Character)
         if murdererRoot then
             local distance = (murdererRoot.Position - myRoot.Position).Magnitude
-            if distance < 30 then
+            if distance < 60 then
                 local fleeDirection = (myRoot.Position - murdererRoot.Position).Unit
-                local fleePos = myRoot.Position + (fleeDirection * 20)
-                fleePos = Vector3.new(fleePos.X, myRoot.Position.Y, fleePos.Z)
-
-                if not PLAY_ROUND.Path then
-                    PLAY_ROUND.Path = PathfindingService:CreatePath({
-                        AgentRadius = 2,
-                        AgentHeight = 5,
-                        AgentCanJump = true
-                    })
-                end
-
-                PLAY_ROUND.Path:ComputeAsync(myRoot.Position, fleePos)
-
-                if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
-                    local waypoints = PLAY_ROUND.Path:GetWaypoints()
-                    if #waypoints > 1 then
-                        humanoid:MoveTo(waypoints[2].Position)
-                        if waypoints[2].Action == Enum.PathWaypointAction.Jump then
-                            humanoid.Jump = true
-                        end
-                    end
-                else
-                    humanoid:MoveTo(fleePos)
+                local fleePos = myRoot.Position + (fleeDirection * 35)
+                local safeFleePos = findSafePositionNear(fleePos, 12, 25)
+                moveHumanoidAlongPath(humanoid, safeFleePos)
+                if math.random() < 0.35 then
+                    humanoid.Jump = true
                 end
                 return
             end
@@ -2494,31 +2602,9 @@ local function handleInnocentBehavior(humanoid, myRoot)
         local sheriffRoot = getRoot(sheriff.Character)
         if sheriffRoot then
             local distance = (sheriffRoot.Position - myRoot.Position).Magnitude
-            if distance > 15 then
-                local followPos = sheriffRoot.Position - (sheriffRoot.CFrame.LookVector * 10)
-                followPos = Vector3.new(followPos.X, sheriffRoot.Position.Y, followPos.Z)
-
-                if not PLAY_ROUND.Path then
-                    PLAY_ROUND.Path = PathfindingService:CreatePath({
-                        AgentRadius = 2,
-                        AgentHeight = 5,
-                        AgentCanJump = true
-                    })
-                end
-
-                PLAY_ROUND.Path:ComputeAsync(myRoot.Position, followPos)
-
-                if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
-                    local waypoints = PLAY_ROUND.Path:GetWaypoints()
-                    if #waypoints > 1 then
-                        humanoid:MoveTo(waypoints[2].Position)
-                        if waypoints[2].Action == Enum.PathWaypointAction.Jump then
-                            humanoid.Jump = true
-                        end
-                    end
-                else
-                    humanoid:MoveTo(followPos)
-                end
+            if distance > 25 then
+                local followPos = sheriffRoot.Position - (sheriffRoot.CFrame.LookVector * 12)
+                moveHumanoidAlongPath(humanoid, followPos)
                 return
             end
         end
@@ -2534,29 +2620,32 @@ local function handleInnocentBehavior(humanoid, myRoot)
     if PLAY_ROUND.CurrentMovement == "Wander" then
         local randomPos = findRandomSafePosition()
         if randomPos then
-            humanoid:MoveTo(randomPos)
+            moveHumanoidAlongPath(humanoid, randomPos)
         end
     elseif PLAY_ROUND.CurrentMovement == "CircleLeft" then
+        resetPlayRoundPathState()
         local center = myRoot.Position + myRoot.CFrame.LookVector * 5
         local angle = currentTime * 2
         local circlePos = center + Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
         humanoid:MoveTo(circlePos)
     elseif PLAY_ROUND.CurrentMovement == "CircleRight" then
+        resetPlayRoundPathState()
         local center = myRoot.Position + myRoot.CFrame.LookVector * 5
         local angle = currentTime * -2
         local circlePos = center + Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
         humanoid:MoveTo(circlePos)
     elseif PLAY_ROUND.CurrentMovement == "Pause" then
-        -- Do nothing
+        resetPlayRoundPathState()
     elseif PLAY_ROUND.CurrentMovement == "RandomJumps" then
         if math.random() < 0.3 then
             humanoid.Jump = true
         end
         local randomPos = findRandomSafePosition()
         if randomPos then
-            humanoid:MoveTo(randomPos)
+            moveHumanoidAlongPath(humanoid, randomPos)
         end
     elseif PLAY_ROUND.CurrentMovement == "ZigZag" then
+        resetPlayRoundPathState()
         local zigzag = math.sin(currentTime * 5) * 5
         local forwardPos = myRoot.Position + myRoot.CFrame.LookVector * 5
         local zigzagPos = forwardPos + myRoot.CFrame.RightVector * zigzag
@@ -2599,27 +2688,7 @@ local function handlePlayRound()
 
     local gunDrop = checkForGunDrop()
     if gunDrop and PLAY_ROUND.CurrentRole ~= "Sheriff" then
-        if not PLAY_ROUND.Path then
-            PLAY_ROUND.Path = PathfindingService:CreatePath({
-                AgentRadius = 2,
-                AgentHeight = 5,
-                AgentCanJump = true
-            })
-        end
-
-        PLAY_ROUND.Path:ComputeAsync(myRoot.Position, gunDrop.Position)
-
-        if PLAY_ROUND.Path.Status == Enum.PathStatus.Success then
-            local waypoints = PLAY_ROUND.Path:GetWaypoints()
-            if #waypoints > 1 then
-                humanoid:MoveTo(waypoints[2].Position)
-                if waypoints[2].Action == Enum.PathWaypointAction.Jump then
-                    humanoid.Jump = true
-                end
-            end
-        else
-            humanoid:MoveTo(gunDrop.Position)
-        end
+        moveHumanoidAlongPath(humanoid, gunDrop.Position)
         return
     end
 
@@ -2641,9 +2710,29 @@ local function startPlayRound()
     PLAY_ROUND.CurrentMovement = "Wander"
     PLAY_ROUND.LastMovementChange = 0
     PLAY_ROUND.MovementHistory = {}
+    resetPlayRoundPathState()
+    PLAY_ROUND.LastPathCompute = 0
+    if PLAY_ROUND.MoveConnection then
+        PLAY_ROUND.MoveConnection:Disconnect()
+        PLAY_ROUND.MoveConnection = nil
+    end
+    PLAY_ROUND.MoveConnectionHumanoid = nil
 
     determineRole()
     makeStandSpeak("... role: "..PLAY_ROUND.CurrentRole)
+
+    local humanoid = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        pcall(function()
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+        end)
+        if humanoid.UseJumpPower ~= nil then
+            humanoid.UseJumpPower = true
+        end
+        if humanoid.JumpPower and humanoid.JumpPower < 40 then
+            humanoid.JumpPower = 40
+        end
+    end
 
     PLAY_ROUND.Connection = RunService.Heartbeat:Connect(handlePlayRound)
 end
@@ -2655,6 +2744,13 @@ local function stopPlayRound()
         PLAY_ROUND.Connection = nil
     end
     PLAY_ROUND.CurrentTarget = nil
+    resetPlayRoundPathState()
+    PLAY_ROUND.LastPathCompute = 0
+    if PLAY_ROUND.MoveConnection then
+        PLAY_ROUND.MoveConnection:Disconnect()
+        PLAY_ROUND.MoveConnection = nil
+    end
+    PLAY_ROUND.MoveConnectionHumanoid = nil
     if PLAY_ROUND.Path then
         PLAY_ROUND.Path:Destroy()
         PLAY_ROUND.Path = nil
