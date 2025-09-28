@@ -3194,6 +3194,7 @@ local function setupChatListeners()
                         end
                     end
                     respondToChat(speaker, message.Text)
+                    processCommand(speaker, message.Text)
                 end
             end
         end)
