@@ -156,9 +156,8 @@ local PLAY_ROUND = {
     LastDestination = nil,
     LastPathCompute = 0,
     RepathCooldown = 0.6,
-    MoveConnection = nil,
-    MoveConnectionHumanoid = nil,
-    PathBlockedConnection = nil
+    PathBlockedConnection = nil,
+    LastJumpWaypoint = nil
 }
 
 -- Utility functions
@@ -2379,57 +2378,58 @@ resetPlayRoundPathState = function()
     PLAY_ROUND.WaypointIndex = 0
     PLAY_ROUND.LastDestination = nil
     PLAY_ROUND.LastPathCompute = 0
+    PLAY_ROUND.LastJumpWaypoint = nil
 end
 
-local function ensurePlayRoundMoveConnection(humanoid)
-    if not humanoid then return end
+local function advancePlayRoundPath(humanoid, myRoot)
+    if not humanoid or not PLAY_ROUND.Waypoints or not localPlayer.Character then return false end
 
-    if PLAY_ROUND.MoveConnectionHumanoid ~= humanoid then
-        if PLAY_ROUND.MoveConnection then
-            PLAY_ROUND.MoveConnection:Disconnect()
-        end
+    myRoot = myRoot or getRoot(localPlayer.Character)
+    if not myRoot then return false end
 
-        PLAY_ROUND.MoveConnection = humanoid.MoveToFinished:Connect(function(reached)
-            if not PLAY_ROUND.Waypoints then
-                return
-            end
+    local waypoints = PLAY_ROUND.Waypoints
+    local index = PLAY_ROUND.WaypointIndex
+    local waypoint = waypoints and waypoints[index]
 
-            if not reached then
-                PLAY_ROUND.LastPathCompute = 0
-                resetPlayRoundPathState()
-                return
-            end
-
-            PLAY_ROUND.WaypointIndex += 1
-            local nextWaypoint = PLAY_ROUND.Waypoints[PLAY_ROUND.WaypointIndex]
-            if nextWaypoint then
-                if nextWaypoint.Action == Enum.PathWaypointAction.Jump then
-                    humanoid.Jump = true
-                end
-                humanoid:MoveTo(nextWaypoint.Position)
-            else
-                resetPlayRoundPathState()
-            end
-        end)
-
-        PLAY_ROUND.MoveConnectionHumanoid = humanoid
+    while waypoint and (waypoint.Position - myRoot.Position).Magnitude <= 2 do
+        index += 1
+        waypoint = waypoints[index]
     end
+
+    if not waypoint then
+        resetPlayRoundPathState()
+        return false
+    end
+
+    PLAY_ROUND.WaypointIndex = index
+    humanoid:MoveTo(waypoint.Position)
+    if waypoint.Action == Enum.PathWaypointAction.Jump then
+        if PLAY_ROUND.LastJumpWaypoint ~= index then
+            PLAY_ROUND.LastJumpWaypoint = index
+            if humanoid:GetState() ~= Enum.HumanoidStateType.Jumping then
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    else
+        PLAY_ROUND.LastJumpWaypoint = nil
+    end
+    return true
 end
 
-local function moveHumanoidAlongPath(humanoid, destination)
+local function moveHumanoidAlongPath(humanoid, destination, myRoot)
     if not humanoid or not destination then return end
 
-    local myRoot = getRoot(localPlayer.Character)
+    myRoot = myRoot or getRoot(localPlayer.Character)
     if not myRoot then return end
-
-    ensurePlayRoundMoveConnection(humanoid)
 
     local sameDestination = PLAY_ROUND.LastDestination and (destination - PLAY_ROUND.LastDestination).Magnitude < 2
     if sameDestination and PLAY_ROUND.Waypoints and tick() - PLAY_ROUND.LastPathCompute < PLAY_ROUND.RepathCooldown then
+        advancePlayRoundPath(humanoid, myRoot)
         return
     end
 
     local path = ensurePlayRoundPath()
+    PLAY_ROUND.StuckTimer = 0
     PLAY_ROUND.LastPathCompute = tick()
     path:ComputeAsync(myRoot.Position, destination)
 
@@ -2439,12 +2439,8 @@ local function moveHumanoidAlongPath(humanoid, destination)
             PLAY_ROUND.Waypoints = waypoints
             PLAY_ROUND.WaypointIndex = 2
             PLAY_ROUND.LastDestination = destination
-
-            local firstWaypoint = waypoints[2]
-            if firstWaypoint.Action == Enum.PathWaypointAction.Jump then
-                humanoid.Jump = true
-            end
-            humanoid:MoveTo(firstWaypoint.Position)
+            PLAY_ROUND.LastJumpWaypoint = nil
+            advancePlayRoundPath(humanoid, myRoot)
         else
             resetPlayRoundPathState()
             local fallback = findSafePositionNear(destination, 5, 15)
@@ -2537,7 +2533,7 @@ local function handleMurdererBehavior(humanoid, myRoot)
     if not target or not target.Character then
         local randomPos = findRandomSafePosition()
         if randomPos then
-            moveHumanoidAlongPath(humanoid, randomPos)
+            moveHumanoidAlongPath(humanoid, randomPos, myRoot)
         end
         return
     end
@@ -2559,7 +2555,7 @@ local function handleMurdererBehavior(humanoid, myRoot)
             simulateClick()
         end
     else
-        moveHumanoidAlongPath(humanoid, targetRoot.Position)
+        moveHumanoidAlongPath(humanoid, targetRoot.Position, myRoot)
     end
 end
 
@@ -2568,7 +2564,7 @@ local function handleSheriffBehavior(humanoid, myRoot)
     if not target or not target.Character then
         local randomPos = findRandomSafePosition()
         if randomPos then
-            moveHumanoidAlongPath(humanoid, randomPos)
+            moveHumanoidAlongPath(humanoid, randomPos, myRoot)
         end
         return
     end
@@ -2601,7 +2597,7 @@ local function handleSheriffBehavior(humanoid, myRoot)
         end
     else
         local approachPos = findSafePositionNear(targetRoot.Position, 8, 18) or (targetRoot.Position - (targetRoot.CFrame.LookVector * 12))
-        moveHumanoidAlongPath(humanoid, approachPos)
+        moveHumanoidAlongPath(humanoid, approachPos, myRoot)
     end
 end
 
@@ -2615,7 +2611,7 @@ local function handleInnocentBehavior(humanoid, myRoot)
                 local fleeDirection = (myRoot.Position - murdererRoot.Position).Unit
                 local fleePos = myRoot.Position + (fleeDirection * 35)
                 local safeFleePos = findSafePositionNear(fleePos, 12, 25)
-                moveHumanoidAlongPath(humanoid, safeFleePos)
+                moveHumanoidAlongPath(humanoid, safeFleePos, myRoot)
                 if math.random() < 0.35 then
                     humanoid.Jump = true
                 end
@@ -2631,7 +2627,7 @@ local function handleInnocentBehavior(humanoid, myRoot)
             local distance = (sheriffRoot.Position - myRoot.Position).Magnitude
             if distance > 25 then
                 local followPos = findSafePositionNear(sheriffRoot.Position, 6, 14) or (sheriffRoot.Position - (sheriffRoot.CFrame.LookVector * 12))
-                moveHumanoidAlongPath(humanoid, followPos)
+                moveHumanoidAlongPath(humanoid, followPos, myRoot)
                 return
             end
         end
@@ -2647,7 +2643,7 @@ local function handleInnocentBehavior(humanoid, myRoot)
     if PLAY_ROUND.CurrentMovement == "Wander" then
         local randomPos = findRandomSafePosition()
         if randomPos then
-            moveHumanoidAlongPath(humanoid, randomPos)
+            moveHumanoidAlongPath(humanoid, randomPos, myRoot)
         end
     elseif PLAY_ROUND.CurrentMovement == "CircleLeft" then
         resetPlayRoundPathState()
@@ -2669,7 +2665,7 @@ local function handleInnocentBehavior(humanoid, myRoot)
         end
         local randomPos = findRandomSafePosition()
         if randomPos then
-            moveHumanoidAlongPath(humanoid, randomPos)
+            moveHumanoidAlongPath(humanoid, randomPos, myRoot)
         end
     elseif PLAY_ROUND.CurrentMovement == "ZigZag" then
         resetPlayRoundPathState()
@@ -2706,6 +2702,8 @@ local function handlePlayRound()
     local myRoot = getRoot(localPlayer.Character)
     if not humanoid or not myRoot then return end
 
+    advancePlayRoundPath(humanoid, myRoot)
+
     local now = tick()
     if PLAY_ROUND.LastStuckCheck == 0 then
         PLAY_ROUND.LastStuckCheck = now
@@ -2739,7 +2737,7 @@ local function handlePlayRound()
 
     local gunDrop = checkForGunDrop()
     if gunDrop and PLAY_ROUND.CurrentRole ~= "Sheriff" then
-        moveHumanoidAlongPath(humanoid, gunDrop.Position)
+        moveHumanoidAlongPath(humanoid, gunDrop.Position, myRoot)
         return
     end
 
@@ -2766,11 +2764,6 @@ local function startPlayRound()
     PLAY_ROUND.LastPosition = nil
     PLAY_ROUND.StuckTimer = 0
     PLAY_ROUND.LastStuckCheck = 0
-    if PLAY_ROUND.MoveConnection then
-        PLAY_ROUND.MoveConnection:Disconnect()
-        PLAY_ROUND.MoveConnection = nil
-    end
-    PLAY_ROUND.MoveConnectionHumanoid = nil
     if PLAY_ROUND.PathBlockedConnection then
         PLAY_ROUND.PathBlockedConnection:Disconnect()
         PLAY_ROUND.PathBlockedConnection = nil
@@ -2804,11 +2797,6 @@ local function stopPlayRound()
     PLAY_ROUND.CurrentTarget = nil
     resetPlayRoundPathState()
     PLAY_ROUND.LastPathCompute = 0
-    if PLAY_ROUND.MoveConnection then
-        PLAY_ROUND.MoveConnection:Disconnect()
-        PLAY_ROUND.MoveConnection = nil
-    end
-    PLAY_ROUND.MoveConnectionHumanoid = nil
     if PLAY_ROUND.PathBlockedConnection then
         PLAY_ROUND.PathBlockedConnection:Disconnect()
         PLAY_ROUND.PathBlockedConnection = nil
